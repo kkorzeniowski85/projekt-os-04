@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+@theme {
+  --color-night: #10163a;
+  --color-night-soft: #1c2452;
+  --color-hero-blue: #2f6bff;
+  --color-hero-cyan: #21d4fd;
+  --color-hero-pink: #ff5fa2;
+  --color-hero-lime: #7bed6b;
+  --color-hero-gold: #ffc93c;
+  --color-hero-violet: #a06bff;
+  --color-paper: #f5f7ff;
+
+  --radius-blob: 2rem;
+}
+
+/*
+ * Font czytelniczy dla angielskiego tekstu, który dziecko CZYTA (grafemy,
+ * słowa). Andika (SIL) jest zaprojektowana dla początkujących czytelników:
+ * jednopiętrowe "a" i proste "g" — takie litery dziecko pozna w brytyjskiej
+ * szkole. Zwykły font UI ma "a" dwupiętrowe, które myli przy nauce phonics.
+ * Wartość odwołuje się do zmiennej next/font, stąd @theme inline.
+ */
+@theme inline {
+  --font-reading: var(--font-andika), "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at 15% 12%, rgba(33, 212, 253, 0.28), transparent 45%),
+    radial-gradient(circle at 85% 8%, rgba(255, 95, 162, 0.25), transparent 40%),
+    radial-gradient(circle at 50% 95%, rgba(160, 107, 255, 0.3), transparent 55%),
+    #10163a;
+  color: #f5f7ff;
+  font-family: "Trebuchet MS", Verdana, system-ui, sans-serif;
+  color-scheme: dark;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
+}
+
+/* Widoczny fokus dla nawigacji klawiaturą — na ciemnym tle domyślny ginie. */
+:focus-visible {
+  outline: 3px solid #ffc93c;
+  outline-offset: 2px;
+}
+
+/* Dziecko na tablecie/telefonie nie powinno przypadkiem zaznaczać tekstu
+   podczas szybkiego stukania w karty. Panel rodzica ma zaznaczanie włączone. */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes pop-in {
+  0% {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes cheer {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-8px) rotate(-3deg);
+  }
+  75% {
+    transform: translateY(-4px) rotate(3deg);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 201, 60, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 24px rgba(255, 201, 60, 0);
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-8px);
+  }
+  75% {
+    transform: translateX(8px);
+  }
+}
+
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 260ms ease-out both;
+}
+
+.animate-cheer {
+  animation: cheer 900ms ease-in-out infinite;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 1600ms ease-out infinite;
+}
+
+.animate-shake {
+  animation: shake 350ms ease-in-out;
+}
+
+/* Promienie za bohaterem na ekranie zwycięstwa. */
+.animate-spin-slow {
+  animation: spin-slow 16s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop-in,
+  .animate-cheer,
+  .animate-pulse-ring,
+  .animate-shake,
+  .animate-spin-slow {
+    animation: none;
+  }
+}

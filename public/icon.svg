@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="96" fill="#10163a"/>
+  <path d="M96 196 L256 120 L416 196 L256 272 Z" fill="#ffc93c"/>
+  <path d="M160 226 L160 316 Q256 372 352 316 L352 226 L256 272 Z" fill="#2f6bff"/>
+  <path d="M396 206 L396 300" stroke="#ffc93c" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="396" cy="312" r="16" fill="#e33d5a"/>
+  <text x="256" y="440" text-anchor="middle" font-family="Arial, sans-serif" font-size="92" font-weight="900" fill="#7bed6b">×÷</text>
+</svg>

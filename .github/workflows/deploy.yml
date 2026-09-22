@@ -1,0 +1,59 @@
+name: Publikacja na GitHub Pages
+
+# Każdy push na main = nowa wersja aplikacji na wszystkich urządzeniach.
+# Telefon/tablet/komputer pobiorą ją same przy następnym otwarciu.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Na Pages aplikacja stoi pod /<nazwa-repo>/, więc build musi znać ten
+      # przedrostek. Bierzemy go z nazwy repozytorium — działa też po zmianie
+      # nazwy albo w forku.
+      - name: Build (eksport statyczny)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          # Krótki znacznik wersji widoczny w trybie rodzica — pozwala od ręki
+          # sprawdzić, czy urządzenie ma najnowszą wersję, czy starą z pamięci.
+          NEXT_PUBLIC_BUILD_ID: ${{ github.sha }}
+
+      # Pages muszą być już włączone w ustawieniach repozytorium (źródło:
+      # GitHub Actions). Token workflow nie ma prawa włączyć ich sam.
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
