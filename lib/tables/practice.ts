@@ -17,6 +17,7 @@ import {
   factKey,
   factsIntroducedBy,
   factsOfTable,
+  introducedWith,
   LEARNING_ORDER,
   parseFact,
   type FactKey,
@@ -45,13 +46,30 @@ const DAY = 24 * 60 * 60 * 1000;
 export type FactOutcome = { correct: boolean; ms: number; ts: number };
 
 /**
+ * Tolerancja terminu: trening następnego dnia o wcześniejszej godzinie też
+ * jest „w terminie" (termin = godzina odpowiedzi + N × 24 h).
+ */
+const DUE_SLACK_MS = DAY / 2;
+
+/** Czy fakt czeka na powtórkę: nowy albo termin minął. */
+export function isFactDue(state: FactState | undefined, now: number): boolean {
+  return !state || state.box === 0 || state.dueTs - DUE_SLACK_MS <= now;
+}
+
+/**
  * Nowy stan faktu po jednej odpowiedzi.
  *
- *  - trening: poprawnie i szybko → pudełko wyżej (nowy, od razu znany fakt
- *    skacze na 2 — to wiedza przyniesiona z polskiej szkoły, nie ma co jej
- *    przerabiać od zera); poprawnie, ale wolno → bez awansu; błąd → pudełko 1;
- *  - próbny test MTC: tylko obniża (błąd → 1). Jedno trafienie w teście nie
- *    jest dowodem płynności — awans jest za regularny trening.
+ *  - trening: awans TYLKO za powtórkę w terminie. Poprawnie i szybko → pudełko
+ *    wyżej (nowy, od razu znany fakt skacze na 2 — to wiedza przyniesiona z
+ *    polskiej szkoły); poprawnie, ale wolno → bez awansu. Trafienie przed
+ *    terminem (druga tura tej samej sesji, fakty „dla pewności siebie") to
+ *    ćwiczenie, nie dowód trwałej pamięci — nie rusza pudełka ani terminu.
+ *    Bez tej zasady fakt był „płynny" po jednym pięciominutowym treningu;
+ *  - błąd → pudełko 1 zawsze (pomyłka jest informacją niezależnie od terminu);
+ *  - fakt płynny odpowiedziany poprawnie, ale wolno, przestaje być płynny
+ *    (w MTC liczenie na palcach to 0 punktów) — także w próbnym teście;
+ *  - próbny test MTC tylko obniża. Jedno trafienie w teście niczego nie
+ *    „zalicza" i nie przesuwa terminu powtórki.
  */
 export function nextFactState(
   previous: FactState | undefined,
@@ -59,21 +77,25 @@ export function nextFactState(
   kind: SessionKind,
 ): FactState {
   const base = previous ?? emptyFactState();
+  const due = isFactDue(previous, outcome.ts);
+  const fast = outcome.ms <= FACT_RULES.fastMs;
   let box = base.box;
+  let dueTs = base.dueTs;
 
   if (!outcome.correct) {
     box = 1;
-  } else if (kind !== "mock") {
-    if (outcome.ms <= FACT_RULES.fastMs) {
-      box = Math.min(FACT_RULES.maxBox, Math.max(box, 1) + 1);
-    } else {
-      box = Math.max(box, 1);
-    }
+    dueTs = outcome.ts + FACT_RULES.intervalsDays[1] * DAY;
+  } else if (!fast && box >= FACT_RULES.fluentBox) {
+    box = FACT_RULES.fluentBox - 1;
+    dueTs = outcome.ts + FACT_RULES.intervalsDays[box] * DAY;
+  } else if (kind !== "mock" && due) {
+    box = fast ? Math.min(FACT_RULES.maxBox, Math.max(box, 1) + 1) : Math.max(box, 1);
+    dueTs = outcome.ts + FACT_RULES.intervalsDays[box] * DAY;
   }
 
   return {
     box,
-    dueTs: outcome.ts + FACT_RULES.intervalsDays[box] * DAY,
+    dueTs,
     lastTs: outcome.ts,
     seen: base.seen + 1,
     right: base.right + (outcome.correct ? 1 : 0),
@@ -94,16 +116,21 @@ export function factLevel(state: FactState | undefined): FactLevel {
   return "weak";
 }
 
+/** Fakty jeszcze nie wprowadzone, w kolejności, w jakiej wprowadzi je trening. */
+export function freshFacts(facts: Record<FactKey, FactState>, table?: number | null): FactKey[] {
+  const source = table ? factsOfTable(table) : LEARNING_ORDER.flatMap((t) => factsIntroducedBy(t));
+  return source.filter((key) => (facts[key]?.box ?? 0) === 0);
+}
+
 /**
- * Tabliczka, na której teraz leży nacisk: pierwsza w kolejności nauki, która
- * ma jeszcze fakty niezaczęte albo słabe (pudełko < 2). Gdy wszystko jest już
- * w drodze — null (trening pracuje wtedy na najsłabszych faktach).
+ * Tabliczka, na której teraz leży nacisk: ta, z której trening wprowadzi
+ * najbliższy nowy fakt (te same reguły co w buildPracticeSet — hub, misja i
+ * raport mówią o tej samej tabliczce, którą dziecko naprawdę ćwiczy). Gdy
+ * wszystkie fakty już weszły — null (trening pracuje na powtórkach).
  */
 export function focusTable(facts: Record<FactKey, FactState>): number | null {
-  for (const table of LEARNING_ORDER) {
-    if (factsIntroducedBy(table).some((key) => (facts[key]?.box ?? 0) < 2)) return table;
-  }
-  return null;
+  const next = freshFacts(facts)[0];
+  return next ? introducedWith(next) : null;
 }
 
 function shuffle<T>(items: T[], random: () => number): T[] {
@@ -146,20 +173,24 @@ export function buildPracticeSet(
   const started = pool.filter((key) => (facts[key]?.box ?? 0) >= 1);
   // Zaległe = termin powtórki minął, łącznie z płynnymi: bez tego fakt płynny
   // nigdy nie wracałby na zaplanowaną powtórkę i wypadałby z pamięci po cichu.
+  // Kolejność: najpierw pudełko 1 (to, co się sypie), potem najbardziej
+  // spóźnione względem własnego odstępu — inaczej świeże fakty z pudełka 2
+  // w nieskończoność spychałyby zaległe z pudełka 3.
+  const overdue = (key: FactKey) =>
+    (now - facts[key].dueTs) / (Math.max(1, FACT_RULES.intervalsDays[facts[key].box]) * DAY);
   const due = started
-    .filter((key) => facts[key].dueTs <= now)
-    .sort((a, b) => facts[a].box - facts[b].box || facts[a].dueTs - facts[b].dueTs);
+    .filter((key) => isFactDue(facts[key], now))
+    .sort((a, b) => Number(facts[b].box === 1) - Number(facts[a].box === 1) || overdue(b) - overdue(a));
 
   // Nowe fakty tabliczka po tabliczce, w kolejności nauki (albo z tabliczki
   // wybranej przez rodzica).
-  const newSource = options.table ? pool : LEARNING_ORDER.flatMap((t) => factsIntroducedBy(t));
-  const fresh = newSource.filter((key) => (facts[key]?.box ?? 0) === 0);
+  const fresh = freshFacts(facts, options.table);
 
   // BRAMKA POJEMNOŚCI: nowe fakty tylko wtedy, gdy nie piętrzą się słabe.
   // Bez niej trening dokładał nowe codziennie i po dziesięciu dniach dziecko
   // miało kilkadziesiąt faktów „w powietrzu" naraz (wyszło w symulacji).
   const weak = started.filter((key) => facts[key].box === 1).length;
-  const newQuota =
+  let newQuota: number =
     started.length < FACT_RULES.maxNewPerSession
       ? FACT_RULES.maxNewPerSession // start nauki: jest z czego zbudować trening
       : weak >= 8
@@ -167,6 +198,12 @@ export function buildPracticeSet(
         : weak >= 4
           ? 2
           : FACT_RULES.newPerSession;
+  // Zaległe powtórki to też obciążenie: gdy jest ich tyle, ile mieści sesja
+  // (na telefonie tylko 12 pytań), nowe fakty czekają.
+  if (started.length >= FACT_RULES.maxNewPerSession) {
+    if (due.length >= size) newQuota = 0;
+    else if (due.length >= size / 2) newQuota = Math.min(newQuota, 2);
+  }
 
   const notDueFluent = shuffle(
     started.filter((key) => facts[key].box >= FACT_RULES.fluentBox && facts[key].dueTs > now),
@@ -197,17 +234,26 @@ export function buildPracticeSet(
   add(notDueFluent, size);
 
   // Jeśli dalej brakuje do pełnej długości (początek nauki), fakty wracają w
-  // DRUGIEJ połowie treningu — najpierw nowe i najsłabsze. Drugie przypomnienie
-  // w tej samej sesji to praktyka przypominania; powtórka tuż po pierwszym
-  // podejściu nie uczyłaby niczego, stąd osobna, późniejsza tura.
+  // DRUGIEJ turze — najpierw nowe i najsłabsze. Drugie przypomnienie w tej
+  // samej sesji to praktyka przypominania (pudełka nie awansuje — patrz
+  // nextFactState). Każdy fakt najwyżej dwa razy; gdy materiału brak, trening
+  // jest po prostu krótszy.
   const firstPass = shuffle(chosen, random);
   const byNeed = [...chosen].sort((a, b) => (facts[a]?.box ?? 0) - (facts[b]?.box ?? 0));
-  const repeats: FactKey[] = [];
-  for (let i = 0; chosen.length > 0 && firstPass.length + repeats.length < size; i++) {
-    repeats.push(byNeed[i % byNeed.length]);
+  const repeats = shuffle(byNeed.slice(0, Math.max(0, size - firstPass.length)), random);
+  // Styk tur: pierwsza powtórka nie może być ostatnim pytaniem pierwszej tury
+  // (powtórka tuż po pierwszym podejściu nie uczy niczego).
+  const last = firstPass[firstPass.length - 1];
+  if (repeats.length > 0 && repeats[0] === last) {
+    if (repeats.length > 1) {
+      const j = 1 + Math.floor(random() * (repeats.length - 1));
+      [repeats[0], repeats[j]] = [repeats[j], repeats[0]];
+    } else if (firstPass.length > 1) {
+      [firstPass[0], firstPass[firstPass.length - 1]] = [firstPass[firstPass.length - 1], firstPass[0]];
+    }
   }
 
-  return [...firstPass, ...shuffle(repeats, random)].map((key) => orient(key, random));
+  return [...firstPass, ...repeats].map((key) => orient(key, random));
 }
 
 export type TablesSummary = {

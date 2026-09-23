@@ -38,19 +38,36 @@ export function textClipPath(text: string): string {
   return `${CLIP_BASE}/phrases/${audioSlug(text)}.mp3`;
 }
 
-const clipAvailability = new Map<string, Promise<boolean>>();
+type ClipState = "yes" | "no" | "unknown";
 
-/** Sprawdza (raz na ścieżkę, potem z pamięci), czy nagranie istnieje. */
-export function clipExists(path: string): Promise<boolean> {
-  if (typeof window === "undefined") return Promise.resolve(false);
+const clipAvailability = new Map<string, Promise<ClipState>>();
+
+/**
+ * Czy nagranie istnieje. Zapamiętujemy tylko pewne odpowiedzi (jest / 404).
+ * Błąd sieci to „nie wiadomo" — nie zapamiętujemy go, bo chwilowy brak zasięgu
+ * oznaczałby nagranie jako brakujące aż do przeładowania strony, a offline
+ * plik i tak może być w pamięci service workera.
+ */
+function clipState(path: string): Promise<ClipState> {
+  if (typeof window === "undefined") return Promise.resolve("no");
   let pending = clipAvailability.get(path);
   if (!pending) {
     pending = fetch(path, { method: "HEAD" })
-      .then((response) => response.ok)
-      .catch(() => false);
+      .then((response): ClipState =>
+        response.ok ? "yes" : response.status === 404 || response.status === 410 ? "no" : "unknown",
+      )
+      .catch((): ClipState => "unknown")
+      .then((state) => {
+        if (state === "unknown") clipAvailability.delete(path);
+        return state;
+      });
     clipAvailability.set(path, pending);
   }
   return pending;
+}
+
+export async function clipExists(path: string): Promise<boolean> {
+  return (await clipState(path)) === "yes";
 }
 
 /**
@@ -78,6 +95,8 @@ let playToken = 0;
 async function playUrl(url: string, wait: boolean): Promise<PlayStatus> {
   const token = ++playToken;
   const audio = getSharedAudio();
+  // Nagranie przerywa też awaryjny głos z poprzedniego odtworzenia.
+  if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
   audio.pause();
   audio.muted = false;
   audio.src = url;
@@ -107,7 +126,11 @@ async function playUrl(url: string, wait: boolean): Promise<PlayStatus> {
   try {
     await audio.play();
   } catch (error) {
-    return (error as DOMException)?.name === "NotAllowedError" ? "blocked" : "failed";
+    const name = (error as DOMException)?.name;
+    // pause() albo nowy src w trakcie ładowania to przerwanie, nie brak
+    // nagrania — inaczej przerwany tekst czytałby potem syntezator.
+    if (name === "AbortError" || token !== playToken) return "interrupted";
+    return name === "NotAllowedError" ? "blocked" : "failed";
   }
   if (finished) await finished;
   return token === playToken ? "ok" : "interrupted";
@@ -192,12 +215,22 @@ async function playClipOrSpeak(
   fallbackText: string,
   options: { wait: boolean; rate: number },
 ): Promise<PlaybackResult> {
-  if (await clipExists(path)) {
+  // Generacja z chwili wywołania: manual(), playSequence i stopAudio podbijają
+  // sequenceToken, więc nieaktualne wywołanie nie zagra i nie zacznie mówić
+  // po tym, jak ktoś je przerwał (także gdy sprawdzanie pliku jeszcze trwało).
+  const generation = sequenceToken;
+  const stale = () => generation !== sequenceToken;
+  const state = await clipState(path);
+  if (stale()) return { source: "clip" };
+  // „Nie wiadomo" (brak sieci): i tak próbujemy — plik może być w pamięci
+  // service workera. Nieudane odtworzenie kończy się syntezą niżej.
+  if (state !== "no") {
     const status = await playUrl(path, options.wait);
     if (status === "ok" || status === "interrupted") return { source: "clip" };
     // Zablokowane = potrzebny gest; synteza też byłaby zablokowana.
     if (status === "blocked") return { source: "unavailable" };
   }
+  if (stale()) return { source: "clip" };
   return (await speak(fallbackText, options.rate, options.wait))
     ? { source: "tts" }
     : { source: "unavailable" };

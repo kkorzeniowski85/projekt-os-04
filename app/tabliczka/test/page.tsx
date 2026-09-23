@@ -136,7 +136,7 @@ function Intro({
 }) {
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center gap-5 text-center">
-      <Link href="/tabliczka/" className="self-start text-sm text-paper/60 underline">
+      <Link href="/tabliczka/" className="flex min-h-11 items-center self-start rounded-full bg-white/10 px-5 text-sm">
         ← Wróć
       </Link>
       <p className="text-6xl">📝</p>
@@ -192,6 +192,8 @@ function QuestionRun({
   const attemptsRef = useRef<PendingAttempt[]>([]);
   const resultsRef = useRef<{ q: Question; answer: string; correct: boolean }[]>([]);
   const submittedRef = useRef(false);
+  const answerTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Rodzic przekazuje nową funkcję przy każdym renderze; bez refa każdy
   // render w trakcie przerwy zaczynałby odliczanie 3 s od nowa.
   const onDoneRef = useRef(onDone);
@@ -202,6 +204,12 @@ function QuestionRun({
   const submit = useCallback(
     (timedOut: boolean) => {
       if (submittedRef.current || !question) return;
+      // Limit czasu odpalony z dużym opóźnieniem = strona była uśpiona (tablet
+      // zgaszony, aplikacja w tle). To nie jest „brak odpowiedzi" dziecka.
+      if (timedOut && Date.now() - shownRef.current > MTC.answerMs + 1500) {
+        setConfirmExit(true);
+        return;
+      }
       submittedRef.current = true;
       const [a, b] = question;
       const answer = valueRef.current;
@@ -227,14 +235,16 @@ function QuestionRun({
     if (phase !== "answer" || confirmExit) return;
     shownRef.current = Date.now();
     submittedRef.current = false;
-    const timer = setTimeout(() => submit(true), MTC.answerMs);
-    return () => clearTimeout(timer);
+    answerTimerRef.current = setTimeout(() => submit(true), MTC.answerMs);
+    return () => clearTimeout(answerTimerRef.current);
   }, [phase, index, confirmExit, submit]);
 
-  // 3 s przerwy, potem następne pytanie albo koniec.
+  // 3 s przerwy, potem następne pytanie albo koniec. Otwarte okno „Przerwać
+  // test?" wstrzymuje też przerwę — inaczej ostatnia przerwa zapisywała test
+  // mimo obietnicy „wynik przerwanego testu się nie zapisze".
   useEffect(() => {
-    if (phase !== "pause") return;
-    const timer = setTimeout(() => {
+    if (phase !== "pause" || confirmExit) return;
+    pauseTimerRef.current = setTimeout(() => {
       if (index + 1 >= questions.length) {
         onDoneRef.current(attemptsRef.current, resultsRef.current);
         return;
@@ -244,8 +254,23 @@ function QuestionRun({
       setIndex(index + 1);
       setPhase("answer");
     }, MTC.pauseMs);
-    return () => clearTimeout(timer);
-  }, [phase, index, questions.length]);
+    return () => clearTimeout(pauseTimerRef.current);
+  }, [phase, index, confirmExit, questions.length]);
+
+  // Karta w tle (rodzic przełączył okno, dziecko zgasiło tablet) = przerwa.
+  // Bez tego test toczył się dalej w ukryciu: wszystkie pytania kończyły się
+  // limitem czasu, a fałszywy wynik obniżał pudełka faktów. Timery czyścimy od
+  // razu w obsłudze zdarzenia — strona może zostać zamrożona przed renderem.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") return;
+      clearTimeout(answerTimerRef.current);
+      clearTimeout(pauseTimerRef.current);
+      setConfirmExit(true);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   const change = (next: string) => {
     valueRef.current = next;
@@ -274,7 +299,8 @@ function QuestionRun({
           <Card className="max-w-md">
             <h2 className="mb-2 text-2xl font-black">Przerwać test?</h2>
             <p className="mb-5 text-paper/75">
-              Wynik przerwanego testu się nie zapisze — pół testu nie mówi, ile dziecko umie.
+              Test stoi. Wynik przerwanego testu się nie zapisze — pół testu nie mówi, ile dziecko umie.
+              „Wróć do testu” daje bieżącemu pytaniu pełne 6 sekund.
             </p>
             <div className="flex flex-col gap-3">
               <BigButton href="/tabliczka/" tone="quiet" full>

@@ -13,6 +13,7 @@ import { playSound, playText } from "@/lib/audio";
 import type { PendingAttempt } from "@/lib/progress/store";
 import type { SessionMode } from "@/lib/progress/types";
 import type { Exercise } from "@/lib/session/exercise";
+import { LearnBody, PassageBelow } from "./ExerciseScreen";
 import { VisualView } from "./VisualView";
 
 export function ReviewScreen({
@@ -42,7 +43,7 @@ export function ReviewScreen({
       </div>
 
       {exercise.heading && <p className="text-sm text-paper/60">{exercise.heading}</p>}
-      {exercise.visual && <VisualView visual={exercise.visual} />}
+      {exercise.visual && exercise.visual.kind !== "passage" && <VisualView visual={exercise.visual} />}
       {exercise.promptEn && (
         <p className="font-reading max-w-2xl text-2xl font-bold">{exercise.promptEn}</p>
       )}
@@ -65,6 +66,7 @@ export function ReviewScreen({
       )}
 
       <BigButton onClick={onForward}>Dalej ▸</BigButton>
+      <PassageBelow exercise={exercise} />
     </Card>
   );
 }
@@ -76,6 +78,9 @@ function Answer({ exercise }: { exercise: Exercise }) {
       if (!option) return null;
       return (
         <div className="flex flex-col items-center gap-1 rounded-blob bg-hero-lime px-6 py-4 text-night">
+          {option.sound && (
+            <Speaker size="sm" onPlay={() => void playSound(option.sound!)} ariaLabel={`Posłuchaj: ${option.label}`} />
+          )}
           {option.emoji && <span className="text-5xl">{option.emoji}</span>}
           {option.visual && <VisualView visual={option.visual} small />}
           <span className="font-reading text-xl font-black">{option.label}</span>
@@ -116,21 +121,7 @@ function Answer({ exercise }: { exercise: Exercise }) {
         </div>
       );
     case "learn":
-      return exercise.examples ? (
-        <ul className="flex w-full max-w-xl flex-col gap-2 text-left">
-          {exercise.examples.map((example) => (
-            <li key={example.en} className="flex items-start gap-3 rounded-2xl bg-white/5 p-3">
-              <Speaker size="sm" onPlay={() => void playText(example.en)} />
-              <span>
-                <span className="font-reading block font-bold">{example.en}</span>
-                {example.pl && <span className="text-sm text-hero-cyan">{example.pl}</span>}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : exercise.bodyPl ? (
-        <p className="max-w-xl text-paper/80">{exercise.bodyPl}</p>
-      ) : null;
+      return <LearnBody exercise={exercise} />;
     case "passage":
       return (
         <div className="flex w-full max-w-2xl flex-col gap-1.5 text-left">

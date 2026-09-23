@@ -16,17 +16,27 @@ const andika = Andika({
   display: "swap",
 });
 
+// Next nie dokleja basePath do tekstowych adresów ikon w metadanych.
+const base = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 export const metadata: Metadata = {
-  title: "Akademia Ligi",
+  title: { default: "Akademia Ligi", template: "%s · Akademia Ligi" },
   description:
     "Przygotowanie do angielskiej szkoły: tabliczka pod Multiplication Tables Check, matematyka po angielsku, czytanie ze zrozumieniem i język klasy",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Akademia Ligi" },
+  // iOS nie bierze ikon SVG z manifestu — bez PNG ikoną na ekranie głównym
+  // byłby zrzut strony.
+  icons: {
+    icon: [{ url: `${base}/icon.svg`, type: "image/svg+xml" }],
+    apple: [{ url: `${base}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" }],
+  },
 };
 
+// Powiększanie szczypaniem zostaje (rodzic czyta drobne teksty w panelu);
+// przypadkowy zoom dwuklikiem przy szybkim stukaniu wyłącza touch-action w
+// globals.css.
 export const viewport: Viewport = {
   themeColor: "#10163a",
-  maximumScale: 1,
-  userScalable: false,
   viewportFit: "cover",
 };
 

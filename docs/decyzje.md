@@ -56,15 +56,26 @@ ucina czasu po 6 s, tylko mierzy, czy odpowiedź przyszła szybko.
 - **Fakt = nieuporządkowana para** (7 × 8 i 8 × 7 to jeden fakt): 66 faktów
   zamiast 121. Przemienność jest częścią nauki, a w treningu fakt pokazuje się
   w obu kolejnościach.
-- **Pudełka Leitnera 0–5** z odstępami 0 / 1 / 3 / 7 / 21 dni. Poprawnie i
-  szybko (≤ 3,5 s) → pudełko wyżej; poprawnie, ale wolno → bez awansu; błąd →
-  pudełko 1. „Płynnie" = pudełko 4+.
+- **Pudełka Leitnera 0–5** z odstępami 0 / 0 / 1 / 3 / 7 / 21 dni. Awans
+  **tylko za powtórkę w terminie** (z tolerancją pół dnia): poprawnie i szybko
+  (≤ 3,5 s) → pudełko wyżej; poprawnie, ale wolno → bez awansu; trafienie przed
+  terminem (druga tura tej samej sesji, fakty „dla pewności siebie") nie rusza
+  ani pudełka, ani terminu. Błąd → pudełko 1 zawsze. Fakt płynny odpowiedziany
+  wolno spada do pudełka 3. „Płynnie" = pudełko 4+, czyli co najmniej trzy
+  szybkie trafienia w powtórkach rozłożonych na dni (pierwszy trening, po
+  dniu, po trzech dniach). Wcześniejsza wersja awansowała przy każdym
+  szybkim trafieniu i fakt był „płynny" po jednym pięciominutowym treningu
+  (wyszło w przeglądzie, 23.09.2026).
+- W jednym treningu każdy fakt najwyżej dwa razy i nigdy dwa razy pod rząd.
+  Nowe fakty czekają, gdy zaległych powtórek jest tyle, ile mieści sesja.
 - Fakt „wchodzi" do nauki razem z pierwszą tabliczką, która go zawiera, w
   kolejności angielskiej szkoły: 2, 10, 5, 3, 4, 8, 11, 6, 9, 7, 12. Dzięki
   przemienności każda kolejna tabliczka wnosi mniej nowego: ×2 — 11 faktów,
   ×12 na końcu — już tylko 12 × 12.
-- Próbny test tylko **obniża** pudełka (ujawnia słabe miejsca), nie podnosi —
-  awans jest za regularny trening, nie za jedno trafienie.
+- Próbny test tylko **obniża** pudełka (ujawnia słabe miejsca), nie podnosi i
+  nie przesuwa terminów — awans jest za regularny trening, nie za jedno
+  trafienie. Karta w tle wstrzymuje test (inaczej toczyłby się w ukryciu i
+  zapisał fałszywy wynik).
 
 ## Pozostałe decyzje
 
@@ -76,8 +87,26 @@ ucina czasu po 6 s, tylko mierzy, czy odpowiedź przyszła szybko.
   - service worker kasuje tylko **własne** stare cache (przedrostek
     `akademia-ligi-`), nigdy cudze;
   - synchronizacja **przejmuje kod rodziny z Ligi**, jeśli Liga jest na tym
-    urządzeniu sparowana — zero dodatkowego parowania. To jedyne świadome
-    powiązanie obu aplikacji (jedna funkcja w `lib/progress/sync.ts`).
+    urządzeniu sparowana — zero dodatkowego parowania — i idzie za Ligą, gdy
+    tam zmieni się obieg. Jawne „Wyłącz" w Akademii jest zapamiętywane i nie
+    jest nadpisywane. Kodu Ligi Akademia tylko CZYTA;
+  - service worker sam uzupełnia swoją powłokę offline po każdej nawigacji
+    online — starsze aplikacje na tej domenie potrafią skasować cały
+    CacheStorage;
+  - nagrania trafiają do pamięci offline w całości (odtwarzacz dostaje
+    wycinek 206 z pamięci) — Cache API nie przyjmuje odpowiedzi 206, więc
+    wcześniej offline nie grało żadne nagranie (dotyczyło też Ligi).
+- **Dane**: „Wyczyść postęp" zostawia znacznik czasu (`resetTs`), który
+  rozchodzi się przez synchronizację — inaczej skasowany postęp wracał z
+  chmury. Imię rozstrzyga czas jego zmiany (`childNameTs`), a nie ostatnia
+  sesja. Fakty tabliczki z dwóch urządzeń, które ćwiczyły niezależnie (np.
+  tablet offline), są scalane przez nałożenie prób z dziennika, a nie
+  „nowszy wygrywa". Plik kopii Ligi (ta sama wersja schematu!) jest
+  odrzucany.
+- **Sesja**: wynik zapisuje się przed rundą bonusową; wyjście inną drogą niż
+  okno przerwania (systemowe „wstecz", odświeżenie) zapisuje zrobioną pracę;
+  pusta sesja nie zostawia śladu; okno przerwania wstrzymuje ekran pod
+  spodem (klawiatura, czas odpowiedzi).
 - **Język klasy** ma w Akademii pełny dział (THUNDER), mimo że podstawowe
   polecenia są też w Lidze Dźwięków (tor 2, „Co mówi nauczyciel"). Powód:
   rodzic wprost wskazał go jako jedną z trzech rzeczy potrzebnych od pierwszego

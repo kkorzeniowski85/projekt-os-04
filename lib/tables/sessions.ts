@@ -13,6 +13,7 @@ import {
   TABLE_TIPS,
   type Question,
 } from "@/lib/curriculum/tables";
+import { pl } from "@/lib/pl";
 import type { FactState } from "@/lib/progress/types";
 import {
   pickSome,
@@ -44,8 +45,8 @@ export function factExercise(
   index: number,
   facts: Record<string, FactState>,
   exercise = "fact",
+  isNew = (facts[factKey(a, b)]?.box ?? 0) === 0,
 ): Exercise {
-  const isNew = (facts[factKey(a, b)]?.box ?? 0) === 0;
   return {
     id: `${exercise}-${index}-${a}x${b}`,
     kind: "typed",
@@ -72,7 +73,15 @@ export function buildTrainingSession(
     now: options.now ?? Date.now(),
     table: options.table ?? null,
   });
-  return questions.map((question, index) => factExercise(question, index, facts));
+  // „Nowy fakt" tylko przy pierwszym pojawieniu w sesji — przy powtórce w
+  // drugiej turze to już znajomy fakt.
+  const shown = new Set<string>();
+  return questions.map((question, index) => {
+    const key = factKey(question[0], question[1]);
+    const isNew = (facts[key]?.box ?? 0) === 0 && !shown.has(key);
+    shown.add(key);
+    return factExercise(question, index, facts, "fact", isNew);
+  });
 }
 
 // --- Lekcja „Liczymy co N" -------------------------------------------------------
@@ -132,7 +141,7 @@ export function buildCountingSession(table: number): Exercise[] {
     promptEn: `Count in ${plural}.`,
     sound: say(`Count in ${plural}.`),
     countAlong: multiples,
-    bodyPl: `Stuknij „Liczymy razem" i liczcie na głos razem z nagraniem. Potem zakryj liczby i spróbujcie z pamięci. „Count in ${plural}" = liczyć co ${table}.`,
+    bodyPl: `Stuknij „Liczymy razem” i liczcie na głos razem z nagraniem. Potem zakryj liczby i spróbujcie z pamięci. „Count in ${plural}” = liczyć co ${table}.`,
     parentPl:
       "Liczenie skokami to w angielskiej szkole podstawa tabliczki — dzieci znają ciągi na pamięć jak piosenkę, a fakt „7 × 6” wyprowadzają, licząc 6 skoków. Dobrze jest liczyć przy tym na palcach: szósty palec = szósta liczba.",
   });
@@ -146,7 +155,7 @@ export function buildCountingSession(table: number): Exercise[] {
     visual: { kind: "array", rows: lots, cols: table, emoji: table > 8 ? "🔹" : "🔵" },
     promptEn: `${lots} lots of ${table} is ${lots * table}.`,
     sound: say(`${lots} lots of ${table} is ${lots * table}.`),
-    bodyPl: `${lots} rzędy po ${table} kropek: ${lots} × ${table} = ${lots * table}. Na lekcji w Anglii to samo działanie usłyszysz na kilka sposobów:`,
+    bodyPl: `${pl(lots, "rząd", "rzędy", "rzędów")} po ${pl(table, "kropka", "kropki", "kropek")}: ${lots} × ${table} = ${lots * table}. Na lekcji w Anglii to samo działanie usłyszysz na kilka sposobów:`,
     examples: [
       { en: `${lots} lots of ${table}`, pl: `${lots} × ${table}` },
       { en: `${lots} groups of ${table}`, pl: `${lots} × ${table}` },
@@ -186,7 +195,7 @@ export function buildCountingSession(table: number): Exercise[] {
     answer: groups * table,
     revealText: `${groups} × ${table} = ${groups * table}`,
     revealSound: { kind: "fact", a: groups, b: table },
-    explainPl: `„${groups} lots of ${table}” to ${groups} grup po ${table}: ${groups} × ${table}.`,
+    explainPl: `„${groups} lots of ${table}” to ${pl(groups, "grupa", "grupy", "grup")} po ${table}: ${groups} × ${table}.`,
   });
 
   // Słuch: wielokrotności tabliczki podane słownie (13/30, 16/60…).
@@ -210,7 +219,7 @@ export function buildCountingSession(table: number): Exercise[] {
     sound: say(`How many ${plural} are there in ${table * k}?`),
     answer: k,
     revealText: `${table * k} ÷ ${table} = ${k}`,
-    explainPl: `„How many ${plural} in ${table * k}?” — ile razy ${table} mieści się w ${table * k}. Licz skokami co ${table}, aż dojdziesz do ${table * k}: wyjdzie ${k} skoków. To dzielenie: ${table * k} ÷ ${table} = ${k}.`,
+    explainPl: `„How many ${plural} in ${table * k}?” — ile razy ${table} mieści się w ${table * k}. Licz skokami co ${table}, aż dojdziesz do ${table * k}: zrobisz ${pl(k, "skok", "skoki", "skoków")}. To dzielenie: ${table * k} ÷ ${table} = ${k}.`,
   });
 
   return screens;

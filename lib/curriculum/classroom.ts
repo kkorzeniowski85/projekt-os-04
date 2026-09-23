@@ -25,46 +25,53 @@ import {
   type MarkStyle,
 } from "@/lib/session/exercise";
 
-export type Command = { en: string; pl: string; actionPl: string; emoji: string };
+/**
+ * `group`: polecenia o prawie tym samym znaczeniu („Eyes on me" i „Stop, look
+ * and listen") — nie mogą być dla siebie błędnymi opcjami, bo dziecko, które
+ * dobrze rozumie, dostałoby błąd.
+ */
+export type Command = { en: string; pl: string; actionPl: string; emoji: string; group?: string };
 
 export const TEACHER_SAYS: Command[] = [
   { en: "Line up, please.", pl: "Ustawcie się w rzędzie.", actionPl: "Ustaw się w rzędzie przy drzwiach, jeden za drugim.", emoji: "🚶" },
   { en: "Put your hand up.", pl: "Podnieś rękę.", actionPl: "Podnieś rękę i czekaj — nie wołaj odpowiedzi.", emoji: "✋" },
-  { en: "Sit on the carpet.", pl: "Usiądź na dywanie.", actionPl: "Usiądź na dywanie przed tablicą, po turecku.", emoji: "🟫" },
+  { en: "Sit on the carpet.", pl: "Usiądź na dywanie.", actionPl: "Usiądź na dywanie przed tablicą, po turecku.", emoji: "🟫", group: "sit" },
   { en: "Tidy up, please.", pl: "Posprzątajcie, proszę.", actionPl: "Odłóż rzeczy na miejsce.", emoji: "🧹" },
-  { en: "Eyes on me.", pl: "Patrzcie na mnie.", actionPl: "Przestań pracować i patrz na nauczyciela.", emoji: "👀" },
-  { en: "Pens down.", pl: "Odłóżcie długopisy.", actionPl: "Odłóż długopis i przestań pisać.", emoji: "✏️" },
+  { en: "Eyes on me.", pl: "Patrzcie na mnie.", actionPl: "Przestań pracować i patrz na nauczyciela.", emoji: "👀", group: "attention" },
+  { en: "Pens down.", pl: "Odłóżcie długopisy.", actionPl: "Odłóż długopis i przestań pisać.", emoji: "✏️", group: "attention" },
   { en: "Get changed for PE.", pl: "Przebierzcie się na WF.", actionPl: "Przebierz się w strój na WF.", emoji: "👟" },
   { en: "Hang your coat on your peg.", pl: "Powieś kurtkę na swoim wieszaku.", actionPl: "Powieś kurtkę na swoim wieszaku w szatni.", emoji: "🧥" },
   { en: "Put your book in your tray.", pl: "Włóż zeszyt do swojej tacki.", actionPl: "Włóż zeszyt do swojej szuflady-tacki.", emoji: "📥" },
   { en: "Walk, don't run!", pl: "Idź, nie biegaj!", actionPl: "Zwolnij i idź spokojnie.", emoji: "🐢" },
   { en: "Stand behind your chair.", pl: "Stań za swoim krzesłem.", actionPl: "Wstań i stań za swoim krzesłem.", emoji: "🪑" },
   { en: "Wash your hands before lunch.", pl: "Umyj ręce przed obiadem.", actionPl: "Idź umyć ręce przed obiadem.", emoji: "🧼" },
-  { en: "Stop, look and listen.", pl: "Stop, patrz i słuchaj.", actionPl: "Zatrzymaj się, patrz na nauczyciela i słuchaj.", emoji: "🛑" },
-  { en: "Come and sit down, please.", pl: "Chodź i usiądź, proszę.", actionPl: "Podejdź i usiądź na swoim miejscu.", emoji: "🙋" },
+  { en: "Stop, look and listen.", pl: "Stop, patrz i słuchaj.", actionPl: "Zatrzymaj się, patrz na nauczyciela i słuchaj.", emoji: "🛑", group: "attention" },
+  { en: "Come and sit down, please.", pl: "Chodź i usiądź, proszę.", actionPl: "Podejdź i usiądź na swoim miejscu.", emoji: "🙋", group: "sit" },
 ];
 
 export const LESSON_TALK: Command[] = [
   { en: "Get your books out.", pl: "Wyjmijcie zeszyty.", actionPl: "Wyjmij zeszyt z tacki.", emoji: "📚" },
   { en: "Write the date and the title.", pl: "Napiszcie datę i temat.", actionPl: "Napisz datę i temat na górze strony.", emoji: "📅" },
   { en: "Underline it with a ruler.", pl: "Podkreśl to linijką.", actionPl: "Podkreśl datę i temat linijką.", emoji: "📏" },
-  { en: "Talk to your partner.", pl: "Porozmawiaj z kolegą z ławki.", actionPl: "Odwróć się do sąsiada i porozmawiajcie o zadaniu.", emoji: "🗣️" },
+  { en: "Talk to your partner.", pl: "Porozmawiaj z kolegą z ławki.", actionPl: "Odwróć się do sąsiada i porozmawiajcie o zadaniu.", emoji: "🗣️", group: "partner" },
   { en: "Show me on your whiteboard.", pl: "Pokaż mi na swojej tabliczce.", actionPl: "Napisz odpowiedź na białej tabliczce i podnieś ją.", emoji: "⬜" },
   { en: "Turn to page twelve.", pl: "Otwórzcie na stronie dwunastej.", actionPl: "Otwórz książkę na stronie 12.", emoji: "📖" },
-  { en: "Work in pairs.", pl: "Pracujcie w parach.", actionPl: "Pracuj razem z jedną osobą.", emoji: "👫" },
+  { en: "Work in pairs.", pl: "Pracujcie w parach.", actionPl: "Pracuj razem z jedną osobą.", emoji: "👫", group: "partner" },
   { en: "Thumbs up if you're ready.", pl: "Kciuk w górę, jeśli jesteś gotowy.", actionPl: "Pokaż kciuk w górę, gdy jesteś gotowy.", emoji: "👍" },
   { en: "Stick the sheet in your book.", pl: "Wklej kartkę do zeszytu.", actionPl: "Wklej kartkę klejem do zeszytu.", emoji: "🧴" },
   { en: "Have a go.", pl: "Spróbuj.", actionPl: "Spróbuj sam, nawet jeśli nie jesteś pewien.", emoji: "💪" },
-  { en: "Check your work.", pl: "Sprawdź swoją pracę.", actionPl: "Przeczytaj jeszcze raz, co napisałeś, i popraw błędy.", emoji: "🔍" },
+  { en: "Check your work.", pl: "Sprawdź swoją pracę.", actionPl: "Przeczytaj jeszcze raz, co napisałeś, i popraw błędy.", emoji: "🔍", group: "finish" },
   { en: "Swap books with your partner.", pl: "Zamieńcie się zeszytami.", actionPl: "Daj zeszyt sąsiadowi i weź jego zeszyt.", emoji: "🔄" },
   { en: "Put your name on it.", pl: "Podpisz to.", actionPl: "Napisz swoje imię na kartce.", emoji: "🏷️" },
-  { en: "Finish off your sentence.", pl: "Dokończ zdanie.", actionPl: "Dopisz koniec zdania, nad którym pracujesz.", emoji: "✍️" },
+  { en: "Finish off your sentence.", pl: "Dokończ zdanie.", actionPl: "Dopisz koniec zdania, nad którym pracujesz.", emoji: "✍️", group: "finish" },
 ];
 
 /** Polecenie ze słuchu → co zrobić. Połowa bez tekstu (samo ucho), połowa z tekstem (czytanie). */
 function commandChoice(command: Command, pool: Command[], index: number, exercise: string): Exercise {
   const others = pickSome(
-    pool.filter((other) => other.en !== command.en),
+    pool.filter(
+      (other) => other.en !== command.en && (command.group === undefined || other.group !== command.group),
+    ),
     2,
   );
   const options: ChoiceOption[] = shuffle([command, ...others]).map((option) => ({
@@ -79,7 +86,6 @@ function commandChoice(command: Command, pool: Command[], index: number, exercis
     item: command.en,
     heading: "Co trzeba zrobić?",
     promptEn: command.en,
-    promptPl: command.pl,
     sound: say(command.en),
     listenOnly: index % 2 === 0,
     options,
@@ -89,6 +95,7 @@ function commandChoice(command: Command, pool: Command[], index: number, exercis
     explainWhen: "wrong",
   };
 }
+
 
 function commandAct(command: Command, index: number, exercise: string): Exercise {
   return {
@@ -215,7 +222,7 @@ function markVerbChoice(verb: MarkVerb, index: number): Exercise {
     kind: "choice",
     exercise: "worksheet-mark",
     item: verb.mark,
-    heading: "Które zrobił dobrze?",
+    heading: "Na którym obrazku zrobiono to, co każe polecenie?",
     promptEn: sentence,
     sound: say(sentence),
     options: shuffle([verb, ...others]).map((option) => ({
@@ -277,9 +284,11 @@ function roundTyped(): Exercise {
     answer: rounded,
     revealText: `${value} → ${rounded}`,
     explainPl:
-      value % 10 === 5
-        ? `Piątka na końcu zaokrągla się w górę: ${value} → ${rounded}.`
-        : `${value} leży bliżej ${rounded} niż ${rounded === Math.floor(value / 10) * 10 ? rounded + 10 : rounded - 10}.`,
+      value % 10 === 0
+        ? `${value} to już pełna dziesiątka — po zaokrągleniu zostaje ${value}.`
+        : value % 10 === 5
+          ? `Piątka na końcu zaokrągla się w górę: ${value} → ${rounded}.`
+          : `${value} leży bliżej ${rounded} niż ${rounded === Math.floor(value / 10) * 10 ? rounded + 10 : rounded - 10}.`,
   };
 }
 
@@ -291,7 +300,7 @@ function worksheetSession(): Exercise[] {
     item: "mark-verbs",
     heading: "Polecenia na kartce",
     bodyPl:
-      "Na angielskich kartkach polecenie jest jednym słowem na początku zdania. Zobacz, co każde każe zrobić ołówkiem:",
+      "Na angielskich kartkach polecenie stoi na początku zdania — zwykle jedno słowo (Tick, Circle, Underline, Colour), czasem dwa (Cross out). Zobacz, co każde każe zrobić ołówkiem:",
     examples: MARK_VERBS.map((verb) => ({
       en: `${verb.en} the star.`,
       pl: verb.pl,
@@ -317,6 +326,8 @@ export type ClassroomUnit = {
   emoji: string;
   goalPl: string;
   parentIntroPl: string;
+  /** Uwaga pod przyciskami startu. */
+  startNotePl?: string;
   build: (mode: "solo" | "parent") => Exercise[];
 };
 
@@ -328,6 +339,7 @@ export const CLASSROOM_UNITS: ClassroomUnit[] = [
     goalPl: "Line up, put your hand up, eyes on me — wiem, co zrobić.",
     parentIntroPl:
       "Najważniejszy temat na pierwsze tygodnie. Dziecko może długo prawie nic nie mówić — to normalny etap nauki języka — ale musi rozumieć polecenia. W trybie z rodzicem na końcu są polecenia „w ruchu”: mówisz po angielsku, dziecko wykonuje. W domu warto używać tych zdań na co dzień („Line up for the car!”).",
+    startNotePl: "Z rodzicem dochodzą polecenia „w ruchu”: rodzic mówi, dziecko wykonuje.",
     build: (mode) => commandsSession(TEACHER_SAYS, "teacher-says", mode),
   },
   {
@@ -337,6 +349,7 @@ export const CLASSROOM_UNITS: ClassroomUnit[] = [
     goalPl: "Get your books out, talk to your partner, show me on your whiteboard.",
     parentIntroPl:
       "Rutyny angielskiej lekcji, których w polskiej szkole nie ma: tacki (trays) zamiast szuflad w ławkach, białe tabliczki (whiteboards) do pokazywania odpowiedzi, rozmowa w parach (talk partners), data i temat podkreślone linijką na początku każdej pracy.",
+    startNotePl: "Z rodzicem dochodzą polecenia „w ruchu”: rodzic mówi, dziecko wykonuje.",
     build: (mode) => commandsSession(LESSON_TALK, "lesson-talk", mode),
   },
   {
@@ -346,6 +359,7 @@ export const CLASSROOM_UNITS: ClassroomUnit[] = [
     goalPl: "Tick, Circle, Underline, Cross out, Show your working.",
     parentIntroPl:
       "Dziecko często umie zadanie, ale robi nie to, co każe polecenie (zakreśla zamiast podkreślić, podaje sam wynik zamiast „show your working”). Te słowa są na każdej kartce i w każdym teście.",
+    startNotePl: "Z rodzicem: po ekranie „Poznaj” pobawcie się poleceniami na zwykłej kartce.",
     build: () => worksheetSession(),
   },
 ];

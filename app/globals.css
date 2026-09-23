@@ -49,6 +49,19 @@ body {
   outline-offset: 2px;
 }
 
+/* Przypadkowy zoom dwuklikiem przy szybkim stukaniu — wyłączony; szczypanie
+   (powiększanie drobnego tekstu przez rodzica) zostaje. */
+html {
+  touch-action: manipulation;
+}
+
+/* iPhone z aplikacją na ekranie głównym: treść pod paskiem statusu i
+   wycięciem (viewportFit: cover). Na urządzeniach bez wycięcia insety = 0. */
+body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}
+
 /* Dziecko na tablecie/telefonie nie powinno przypadkiem zaznaczać tekstu
    podczas szybkiego stukania w karty. Panel rodzica ma zaznaczanie włączone. */
 .no-select {

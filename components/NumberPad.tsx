@@ -46,7 +46,8 @@ export function NumberPad({
   useEffect(() => {
     if (disabled) return;
     function onKey(event: KeyboardEvent) {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // Autopowtarzanie przytrzymanego klawisza: „5555" albo seria Enterów.
+      if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
         press(event.key);

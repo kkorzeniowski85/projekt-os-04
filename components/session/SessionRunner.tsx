@@ -54,17 +54,20 @@ export function SessionRunner(props: SessionRunnerProps) {
 
   const flow = useSessionFlow<Exercise>({
     build: props.build,
-    commit: (attempts, mode, startedTs) =>
-      commitSession({
-        module: props.module,
-        unitId: props.unitId,
-        kind: props.kind,
-        mode,
-        device: role,
-        startedTs,
-        endedTs: Date.now(),
-        attempts,
-      }),
+    commit: (attempts, mode, startedTs, flush) =>
+      commitSession(
+        {
+          module: props.module,
+          unitId: props.unitId,
+          kind: props.kind,
+          mode,
+          device: role,
+          startedTs,
+          endedTs: Date.now(),
+          attempts,
+        },
+        { flush },
+      ),
     bonusFor:
       props.bonus === false
         ? undefined
@@ -95,7 +98,9 @@ export function SessionRunner(props: SessionRunnerProps) {
           zrobione={flow.frontier}
           wszystkich={flow.screens.length}
           ocenianych={flow.scoredCount()}
+          zapisane={flow.isSaved()}
           onZapisz={flow.saveNow}
+          onPorzuc={flow.discard}
           onWroc={flow.closeInterrupt}
           exitHref={props.exitHref}
         />
@@ -114,7 +119,7 @@ export function SessionRunner(props: SessionRunnerProps) {
                 onClick={flow.goBack}
                 aria-label="Poprzedni ekran"
                 title="Wróć do poprzedniego ekranu"
-                className="flex min-h-9 min-w-9 items-center justify-center rounded-full bg-white/10 text-lg"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-full bg-white/10 text-lg"
               >
                 ↩
               </button>
@@ -148,6 +153,8 @@ export function SessionRunner(props: SessionRunnerProps) {
             mode={flow.mode}
             onAnswer={flow.onAnswer}
             onNext={flow.onNext}
+            paused={flow.interrupting}
+            firstAttempt={flow.attemptAt(flow.index)}
           />
         )}
       </div>
@@ -207,7 +214,7 @@ function IntroScreen({
 
   return (
     <div className={`flex flex-col items-center text-center ${phone ? "gap-4" : "gap-6"}`}>
-      <Link href={exitHref} className="self-start text-sm text-paper/60 underline">
+      <Link href={exitHref} className="flex min-h-11 items-center self-start rounded-full bg-white/10 px-5 text-sm">
         ← Wróć
       </Link>
       <div className="flex flex-col items-center gap-2">

@@ -12,7 +12,7 @@
  *  7. pliki nagrań istnieją na dysku (gdy już wygenerowane).
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildMtcForm, checkMtcForm, TABLES } from "../lib/curriculum/tables.ts";
@@ -113,6 +113,10 @@ if (existsSync(audioDir)) {
   for (const a of TABLES) for (const b of TABLES) existsSync(path.join(audioDir, "facts", `${a}x${b}.mp3`)) || missingFiles.push(`facts/${a}x${b}`);
   phrases.forEach((text) => existsSync(path.join(audioDir, "phrases", `${audioSlug(text)}.mp3`)) || missingFiles.push(`phrases: "${text}"`));
   if (missingFiles.length) warn.push(`brakuje ${missingFiles.length} plików nagrań (npm run audio), np. ${missingFiles.slice(0, 5).join(", ")}`);
+  // Nagrania po zmienionych tekstach — niepotrzebnie powiększają aplikację.
+  const usedPhrases = new Set([...phrases].map((text) => `${audioSlug(text)}.mp3`));
+  const orphans = readdirSync(path.join(audioDir, "phrases")).filter((file) => !usedPhrases.has(file));
+  if (orphans.length) warn.push(`nieużywane nagrania (do usunięcia): ${orphans.join(", ")}`);
 } else {
   warn.push("nie ma jeszcze katalogu public/audio (npm run audio)");
 }

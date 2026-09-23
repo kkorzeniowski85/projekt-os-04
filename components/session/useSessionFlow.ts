@@ -14,8 +14,14 @@
  *  - liczy się PIERWSZA odpowiedź na ekranie (mapa próba-na-ekran), więc
  *    naprawa błędu i cofanie nie zmieniają wyniku;
  *  - runda bonusowa: do trzech ekranów, które poszły źle, wraca na końcu —
- *    bez punktów, po to, żeby ostatni kontakt z trudnym materiałem był udany;
- *  - przerwanie: zapisz to, co zrobione, albo wyjdź bez śladu.
+ *    bez punktów, po to, żeby ostatni kontakt z trudnym materiałem był udany.
+ *    Wynik zapisuje się już PRZED bonusem — wyjście w rundzie „bez punktów"
+ *    nie może kasować ukończonej sesji;
+ *  - przerwanie: „Zapisz i wyjdź" albo „Wyjdź bez zapisu". Wyjście w inny
+ *    sposób (systemowe „wstecz" tabletu, odświeżenie, zamknięcie karty)
+ *    ZAPISUJE zrobioną pracę — okna przerwania wtedy nie ma, a cicha utrata
+ *    dwudziestu odpowiedzi to dokładnie to, przed czym okno miało chronić.
+ *    Sesja bez ani jednej odpowiedzi nie zostawia śladu nigdy.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -41,15 +47,26 @@ export type SessionFlow<S> = {
   goForward: () => void;
   openInterrupt: () => void;
   closeInterrupt: () => void;
-  /** Zapis przerwanej sesji („Zapisz i wyjdź"). */
+  /** „Zapisz i wyjdź". Bez żadnej odpowiedzi nic nie zapisuje. */
   saveNow: () => void;
+  /** „Wyjdź bez zapisu": wyjście z ekranu niczego nie zapisze. */
+  discard: () => void;
+  /** Czy jest coś do zapisania (choć jedna odpowiedź). */
+  hasWork: () => boolean;
+  /** Czy sesja jest już zapisana (od wejścia w rundę bonusową). */
+  isSaved: () => boolean;
   scoredCount: () => number;
   attemptAt: (index: number) => PendingAttempt | undefined;
 };
 
 export function useSessionFlow<S>(options: {
   build: (mode: SessionMode) => S[];
-  commit: (attempts: PendingAttempt[], mode: SessionMode, startedTs: number) => SessionOutcome;
+  commit: (
+    attempts: PendingAttempt[],
+    mode: SessionMode,
+    startedTs: number,
+    flush?: boolean,
+  ) => SessionOutcome;
   /** Ekran do rundy bonusowej dla nieudanej próby; null/brak = bez bonusu. */
   bonusFor?: (screen: S) => S | null;
 }): SessionFlow<S> {
@@ -72,6 +89,10 @@ export function useSessionFlow<S>(options: {
   const modeRef = useRef<SessionMode>("parent");
   const bonusStartRef = useRef<number | null>(null);
   const committedRef = useRef(false);
+  const outcomeRef = useRef<SessionOutcome | null>(null);
+  const discardRef = useRef(false);
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
 
   useEffect(() => {
     primeSpeech();
@@ -98,6 +119,8 @@ export function useSessionFlow<S>(options: {
     frontierRef.current = 0;
     bonusStartRef.current = null;
     committedRef.current = false;
+    outcomeRef.current = null;
+    discardRef.current = false;
     startedRef.current = Date.now();
     setFrontier(0);
     setIndex(0);
@@ -121,11 +144,21 @@ export function useSessionFlow<S>(options: {
     setIndex(next);
   }, []);
 
-  const commitOnce = useCallback((): SessionOutcome | null => {
-    if (committedRef.current) return null;
-    committedRef.current = true;
-    return optionsRef.current.commit(collected(), modeRef.current, startedRef.current);
-  }, [collected]);
+  /** Zapis sesji najwyżej raz; bez żadnej odpowiedzi — wcale. */
+  const commitOnce = useCallback(
+    (flush = false): SessionOutcome | null => {
+      if (committedRef.current || attemptsRef.current.size === 0) return null;
+      committedRef.current = true;
+      outcomeRef.current = optionsRef.current.commit(
+        collected(),
+        modeRef.current,
+        startedRef.current,
+        flush,
+      );
+      return outcomeRef.current;
+    },
+    [collected],
+  );
 
   useEffect(() => {
     if (stage !== "running" || screens.length === 0 || frontier < screens.length) return;
@@ -137,15 +170,31 @@ export function useSessionFlow<S>(options: {
         .map(([i]) => bonusFor(screens[i]))
         .filter((screen): screen is S => screen !== null && screen !== undefined);
       if (extra.length > 0) {
+        commitOnce();
         bonusStartRef.current = screens.length;
         setScreens((previous) => [...previous, ...extra]);
         return;
       }
     }
-    const result = commitOnce();
-    if (result) setOutcome(result);
+    commitOnce();
+    setOutcome(outcomeRef.current ?? emptyOutcome());
     setStage("done");
   }, [stage, frontier, screens, commitOnce]);
+
+  // Wyjście z sesji inną drogą niż okno przerwania: zapisać zrobioną pracę.
+  useEffect(() => {
+    const saveOnLeave = () => {
+      if (stageRef.current === "running" && !discardRef.current) commitOnce(true);
+    };
+    // pagehide: odświeżenie, zamknięcie karty. Zapis synchroniczny (flush),
+    // bo strona może zniknąć, zanim React dokończy render.
+    window.addEventListener("pagehide", saveOnLeave);
+    return () => {
+      window.removeEventListener("pagehide", saveOnLeave);
+      // Odmontowanie: systemowe „wstecz" albo link poza sesję.
+      saveOnLeave();
+    };
+  }, [commitOnce]);
 
   const screen = screens[index];
 
@@ -175,10 +224,37 @@ export function useSessionFlow<S>(options: {
     closeInterrupt: () => setInterrupting(false),
     saveNow: () => {
       stopAudio();
-      commitOnce();
+      commitOnce(true);
     },
+    discard: () => {
+      stopAudio();
+      discardRef.current = true;
+    },
+    hasWork: () => attemptsRef.current.size > 0,
+    isSaved: () => committedRef.current,
     scoredCount: () =>
       [...attemptsRef.current.values()].filter((attempt) => attempt.correct !== null).length,
     attemptAt: (i: number) => attemptsRef.current.get(i),
+  };
+}
+
+/** Wynik sesji bez żadnej odpowiedzi — nic nie zapisano, ale ekran końca się należy. */
+function emptyOutcome(): SessionOutcome {
+  const now = Date.now();
+  return {
+    session: {
+      id: "",
+      module: "tables",
+      unitId: "",
+      kind: "lesson",
+      mode: "parent",
+      device: "tablet",
+      startedTs: now,
+      endedTs: now,
+      correct: 0,
+      scored: 0,
+    },
+    accuracy: null,
+    newlyFluent: [],
   };
 }

@@ -3,10 +3,6 @@
 /**
  * Rejestracja service workera = instalowalna PWA + działanie bez internetu.
  *
- * Offline było jednym z pytań otwartych w briefie; tutaj jest w minimalnej,
- * bezpiecznej wersji: cache'ujemy tylko powłokę aplikacji. Postęp i tak siedzi
- * w localStorage, więc sesja w podróży zadziała.
- *
  * Bez powiadomień push — nie ma po co prosić dziecko o zgody, których nie
  * potrzebujemy.
  */
@@ -18,32 +14,48 @@ export function ServiceWorkerRegistrar() {
     if (process.env.NODE_ENV !== "production") return;
     if (!("serviceWorker" in navigator)) return;
 
-    // Bez tego: nowa wersja aplikacji instaluje się w tle (skipWaiting w sw.js),
-    // ale karta/PWA otwarta wcześniej i tylko wznowiona z tła (typowe na
-    // tablecie — ikonka nie zawsze robi pełne przeładowanie) dalej pokazuje
-    // STARY kod, mimo że serwer i service worker już mają nową wersję.
-    // "controllerchange" mówi nam dokładnie, kiedy nowa wersja przejmuje
-    // kontrolę, i wtedy przeładowujemy raz — dziecko/rodzic widzą aktualną
-    // treść zamiast starej, wciąż działającej w pamięci.
-    let odswiezono = false;
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (odswiezono) return;
-      odswiezono = true;
+    // Nowa wersja instaluje się w tle (skipWaiting w sw.js), ale karta albo
+    // PWA wznowiona z tła dalej pokazuje stary kod. Po zmianie kontrolera
+    // przeładowujemy raz — ale:
+    //  - nie przy PIERWSZEJ instalacji (kontroler null → SW): strona ma już
+    //    aktualny kod, a przeładowanie zgubiłoby rozpoczętą sesję;
+    //  - nie w trakcie ćwiczenia: dopiero gdy aplikacja zejdzie z ekranu
+    //    (sesja zapisuje się wtedy sama — pagehide w useSessionFlow).
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let pending = false;
+    let reloaded = false;
+    const reloadWhenHidden = () => {
+      if (!pending || reloaded || document.visibilityState !== "hidden") return;
+      reloaded = true;
       window.location.reload();
-    });
+    };
+    const onControllerChange = () => {
+      if (!hadController) return;
+      pending = true;
+      reloadWhenHidden();
+    };
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+    document.addEventListener("visibilitychange", reloadWhenHidden);
 
     const base = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+    let timer: ReturnType<typeof setInterval> | undefined;
     navigator.serviceWorker
       .register(`${base}/sw.js`, { scope: `${base}/` })
       .then((registration) => {
         // Nowa wersja aplikacji ma się pojawić bez ręcznego czyszczenia cache —
         // sprawdzamy przy każdym uruchomieniu i raz na godzinę przy dłuższym.
         void registration.update();
-        setInterval(() => void registration.update(), 60 * 60 * 1000);
+        timer = setInterval(() => void registration.update(), 60 * 60 * 1000);
       })
       .catch(() => {
         // Brak SW to nie powód do psucia aplikacji — działa dalej online.
       });
+
+    return () => {
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      document.removeEventListener("visibilitychange", reloadWhenHidden);
+      if (timer) clearInterval(timer);
+    };
   }, []);
 
   return null;

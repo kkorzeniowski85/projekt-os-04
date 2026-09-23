@@ -11,6 +11,7 @@ import { MATHS_TOPICS } from "@/lib/curriculum/maths";
 import { READING_TEXTS, SKILL_LABEL, type ReadingSkill } from "@/lib/curriculum/reading";
 import { CLASSROOM_UNITS } from "@/lib/curriculum/classroom";
 import { MTC_WINDOW_START, daysUntil } from "@/lib/mtcDates";
+import { pl } from "@/lib/pl";
 import { focusTable, tablesSummary, weakestFacts } from "@/lib/tables/practice";
 import { accuracyOf } from "./rules";
 import { unitKeyOf, type ModuleId, type ProgressState } from "./types";
@@ -38,6 +39,26 @@ function formatDate(ts: number | null): string {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
+/**
+ * Liczba różnych dni (czas lokalny) z treningiem tabliczki w ostatnich `days`
+ * dniach kalendarzowych, łącznie z dzisiejszym. Wspólna dla raportu i panelu —
+ * okno „teraz minus 28 × 24 h" obejmowało 29 dat i dawało „29/28".
+ */
+export function trainingDaysCount(state: ProgressState, now = Date.now(), days = 28): number {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  const since = start.getTime();
+  return new Set(
+    state.sessions
+      .filter(
+        (session) =>
+          session.module === "tables" && session.kind === "practice" && session.endedTs >= since && session.endedTs <= now,
+      )
+      .map((session) => new Date(session.endedTs).toDateString()),
+  ).size;
+}
+
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -53,16 +74,25 @@ export function buildMarkdownReport(state: ProgressState, now = Date.now()): str
 
   lines.push(`# Akademia Ligi — raport: ${state.childName}`);
   lines.push("");
-  lines.push(`Okres: ostatnie ${days} dni (do ${formatDate(now)}). Do okna MTC (czerwiec 2028): ${daysUntil(MTC_WINDOW_START, now)} dni.`);
-  const trainingDays = new Set(
-    recent.filter((session) => session.module === "tables" && session.kind === "practice").map((session) => formatDate(session.endedTs)),
+  lines.push(
+    `Okres: ostatnie ${days} dni (do ${formatDate(now)}). Do okna MTC (czerwiec 2028): ${pl(daysUntil(MTC_WINDOW_START, now), "dzień", "dni", "dni")}.`,
   );
   lines.push(
-    `Sesje w okresie: ${recent.length} (łącznie ${state.sessions.length}). Dni z treningiem tabliczki: ${trainingDays.size}/${days}.`,
+    `Sesje w okresie: ${recent.length} (łącznie ${state.sessions.length}). Dni z treningiem tabliczki: ${trainingDaysCount(state, now, days)}/${days}.`,
   );
+  const minutes = recent.map((session) => Math.max(0, session.endedTs - session.startedTs) / 60000);
+  const soloCount = recent.filter((session) => session.mode === "solo").length;
+  if (recent.length > 0) {
+    lines.push(
+      `Czas nauki w okresie: ~${Math.round(minutes.reduce((sum, m) => sum + m, 0))} min (mediana sesji: ${(median(minutes.map((m) => Math.round(m * 10))) ?? 0) / 10} min). Tryb: ${soloCount} samodzielnie / ${recent.length - soloCount} z rodzicem.`,
+    );
+  }
   for (const module of Object.keys(MODULE_LABEL) as ModuleId[]) {
-    const count = recent.filter((session) => session.module === module).length;
-    lines.push(`- ${MODULE_LABEL[module]}: ${count} sesji`);
+    const inModule = recent.filter((session) => session.module === module);
+    const solo = inModule.filter((session) => session.mode === "solo").length;
+    lines.push(
+      `- ${MODULE_LABEL[module]}: ${pl(inModule.length, "sesja", "sesje", "sesji")}${inModule.length ? ` (samodzielnie ${solo} / z rodzicem ${inModule.length - solo})` : ""}`,
+    );
   }
 
   // --- Tabliczka
@@ -71,7 +101,7 @@ export function buildMarkdownReport(state: ProgressState, now = Date.now()): str
   lines.push("");
   lines.push("## Tabliczka (przygotowanie do MTC)");
   lines.push(
-    `Płynnie (pudełko 4+, odpowiedź ≤ 3,5 s): ${summary.fluent}/66 · w drodze: ${summary.learning} · do powtórki: ${summary.weak} · niećwiczone: ${summary.unseen}.`,
+    `Płynnie (pudełko 4+: szybkie trafienia w powtórkach w terminie, co najmniej 3 dni nauki): ${summary.fluent}/66 · w drodze: ${summary.learning} · do powtórki: ${summary.weak} · niećwiczone: ${summary.unseen}.`,
   );
   lines.push(`Tabliczka w centrum uwagi: ${focus ? `×${focus}` : "wszystkie w drodze"}.`);
   lines.push(
@@ -114,7 +144,7 @@ export function buildMarkdownReport(state: ProgressState, now = Date.now()): str
   } else {
     for (const mock of state.mocks.slice(-6)) {
       lines.push(
-        `- ${formatDate(mock.ts)}: ${mock.score}/${mock.total}${mock.missed.length ? ` — bez punktu: ${mock.missed.join(", ")}` : ""}`,
+        `- ${formatDate(mock.ts)}: ${mock.score}/${mock.total}${mock.mode === "parent" ? " (z rodzicem obok)" : ""}${mock.missed.length ? ` — bez punktu: ${mock.missed.join(", ")}` : ""}`,
       );
     }
     lines.push("(Średnia krajowa 2024/25: 21,0/25; 37% dzieci ma komplet.)");

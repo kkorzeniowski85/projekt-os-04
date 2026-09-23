@@ -9,6 +9,7 @@ import { useState } from "react";
 import { ClockFace } from "@/components/ClockFace";
 import { Speaker } from "@/components/ui";
 import { playText } from "@/lib/audio";
+import { pl } from "@/lib/pl";
 import type { MarkStyle, Visual } from "@/lib/session/exercise";
 
 export function VisualView({ visual, small = false }: { visual: Visual; small?: boolean }) {
@@ -113,7 +114,7 @@ export function DotArray({
 }) {
   const size = small ? "text-base" : cols > 8 ? "text-lg" : "text-2xl";
   return (
-    <div className="flex flex-col items-center gap-1.5" aria-label={`${rows} rzędy po ${cols}`}>
+    <div className="flex flex-col items-center gap-1.5" aria-label={`${pl(rows, "rząd", "rzędy", "rzędów")} po ${cols}`}>
       {Array.from({ length: rows }, (_, row) => (
         <div key={row} className="flex gap-1 rounded-full bg-white/5 px-2 py-0.5">
           {Array.from({ length: cols }, (_, col) => (

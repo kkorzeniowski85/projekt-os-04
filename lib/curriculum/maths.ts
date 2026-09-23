@@ -637,9 +637,9 @@ export const NOTATION: NotationItem[] = [
     id: "pounds",
     shown: "£3.50",
     promptEn: "How do you say this amount?",
-    options: ["three pounds fifty", "thirty-five pounds", "three hundred and fifty pence"],
+    options: ["three pounds fifty", "thirty-five pounds", "thirty-five pence"],
     answer: "three pounds fifty",
-    explainPl: "£ stoi PRZED liczbą: £3.50 = 3 funty i 50 pensów, mówi się „three pounds fifty”. 100 pensów = 1 funt.",
+    explainPl: "£ stoi PRZED liczbą: £3.50 = 3 funty i 50 pensów, mówi się „three pounds fifty”. To tyle samo co 350 pensów (100 pensów = 1 funt), ale kwotę z £ czyta się w funtach.",
   },
   {
     id: "pence",

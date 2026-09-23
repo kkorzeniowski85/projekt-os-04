@@ -4,13 +4,23 @@
  * Zasada: tabliczka codziennie (krótko — praktyka rozłożona działa lepiej niż
  * długa raz w tygodniu), a pozostałe działy na zmianę, zaczynając od tego,
  * który najdłużej czekał. Dziecko nie musi wybierać — rodzic też nie.
+ *
+ * Nowa tabliczka: najpierw lekcja „Liczymy co N" (zrozumienie), dopiero potem
+ * trening (utrwalanie) — dlatego lekcja stoi w misji PRZED treningiem.
  */
 
 import { CLASSROOM_UNITS } from "@/lib/curriculum/classroom";
 import { MATHS_TOPICS } from "@/lib/curriculum/maths";
 import { READING_TEXTS } from "@/lib/curriculum/reading";
+import { LEARNING_ORDER } from "@/lib/curriculum/tables";
+import { RULES } from "@/lib/progress/rules";
 import { focusTable } from "@/lib/tables/practice";
-import { unitKeyOf, type ModuleId, type ProgressState } from "@/lib/progress/types";
+import {
+  unitKeyOf,
+  type ModuleId,
+  type ProgressState,
+  type SessionRecord,
+} from "@/lib/progress/types";
 
 export type MissionStep = {
   module: ModuleId;
@@ -23,6 +33,14 @@ export type MissionStep = {
 
 function isToday(ts: number, now: number): boolean {
   return new Date(ts).toDateString() === new Date(now).toDateString();
+}
+
+/**
+ * Sesja, która naprawdę coś zrobiła — przerwana po dwóch zadaniach nie odhacza
+ * misji (ten sam próg, od którego sesja zmienia ocenę tematu).
+ */
+function counts(session: SessionRecord): boolean {
+  return session.scored >= RULES.minScoredForStatus;
 }
 
 const MODULE_UNITS: Record<Exclude<ModuleId, "tables">, { id: string; title: string; href: string; emoji: string }[]> = {
@@ -52,35 +70,51 @@ function nextUnit(state: ProgressState, module: Exclude<ModuleId, "tables">) {
   );
 }
 
+/**
+ * Lekcja „Liczymy co N" do zrobienia: pierwsza tabliczka w kolejności nauki —
+ * do tabliczki, z której trening wprowadza teraz nowe fakty, włącznie — która
+ * nie ma jeszcze lekcji z oceną. Gdy wszystkie fakty już weszły, pierwsza
+ * tabliczka bez lekcji w ogóle (żeby ×12 też kiedyś wypadła).
+ */
+export function nextCountingLesson(state: ProgressState): number | null {
+  const focus = focusTable(state.facts);
+  const lastIndex = focus ? LEARNING_ORDER.indexOf(focus as (typeof LEARNING_ORDER)[number]) : LEARNING_ORDER.length - 1;
+  const lessonDone = (table: number) => {
+    const unit = state.units[unitKeyOf("tables", `count-${table}`)];
+    return Boolean(unit) && unit.status !== "new";
+  };
+  return LEARNING_ORDER.slice(0, lastIndex + 1).find((table) => !lessonDone(table)) ?? null;
+}
+
 export function dailyMission(state: ProgressState, now = Date.now()): MissionStep[] {
-  const today = state.sessions.filter((session) => isToday(session.endedTs, now));
+  const today = state.sessions.filter((session) => isToday(session.endedTs, now) && counts(session));
   const steps: MissionStep[] = [];
 
-  const trainedToday = today.some((session) => session.module === "tables" && session.kind === "practice");
+  // Krok 1: lekcja nowej tabliczki (zrobiona dziś zostaje na liście z ✅).
+  const lessonToday = today.find((session) => session.module === "tables" && session.kind === "count");
+  const lessonTable = lessonToday ? Number(lessonToday.unitId.replace("count-", "")) : nextCountingLesson(state);
+  if (lessonTable) {
+    steps.push({
+      module: "tables",
+      emoji: "🔢",
+      title: `Liczymy co ${lessonTable}`,
+      subtitle: "nowa tabliczka — najpierw zrozumieć",
+      href: `/tabliczka/liczenie/${lessonTable}/`,
+      done: Boolean(lessonToday),
+    });
+  }
+
+  // Krok 2: codzienny trening.
   steps.push({
     module: "tables",
     emoji: "⚡",
     title: "Trening tabliczki",
     subtitle: "ok. 5 minut",
     href: "/tabliczka/trening/",
-    done: trainedToday,
+    done: today.some((session) => session.module === "tables" && session.kind === "practice"),
   });
 
-  // Nowa tabliczka w centrum uwagi, a lekcji „Liczymy co N" jeszcze nie było —
-  // najpierw zrozumienie, potem wkuwanie.
-  const focus = focusTable(state.facts);
-  if (focus && !state.units[unitKeyOf("tables", `count-${focus}`)]) {
-    steps.push({
-      module: "tables",
-      emoji: "🔢",
-      title: `Liczymy co ${focus}`,
-      subtitle: "nowa tabliczka — najpierw zrozumieć",
-      href: `/tabliczka/liczenie/${focus}/`,
-      done: false,
-    });
-  }
-
-  // Dział, który najdłużej czekał (ten zrobiony dziś zostaje na liście jako „zrobione").
+  // Krok 3: dział, który najdłużej czekał (zrobiony dziś zostaje jako „zrobione").
   const lastOf = (module: ModuleId) =>
     Math.max(0, ...state.sessions.filter((session) => session.module === module).map((session) => session.endedTs));
   const others = (["tasks", "maths", "reading"] as const).slice().sort((a, b) => lastOf(a) - lastOf(b));

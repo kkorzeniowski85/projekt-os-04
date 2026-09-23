@@ -41,7 +41,8 @@
  * czyta i pisze — więc nie trzymamy tam niczego wrażliwego.
  */
 
-import { mergeProgress, parseProgressFile } from "./merge";
+import { mergeProgress, parseProgressFile, progressVersionOf } from "./merge";
+import { PROGRESS_SCHEMA_VERSION } from "./types";
 import type { ProgressState } from "./types";
 
 const ENDPOINT = "https://textdb.dev/api/data";
@@ -57,7 +58,7 @@ const LIGA_SYNC_KEY = "phonics.sync.v2";
 /** Usługa odrzuca ładunki powyżej ~1 MB; zostawiamy zapas na koperty. */
 const LIMIT_BAJTOW = 800_000;
 
-export type SyncError = "brak-sieci" | "usluga-odmowila" | "za-duzo-danych";
+export type SyncError = "brak-sieci" | "usluga-odmowila" | "za-duzo-danych" | "nowsza-wersja";
 
 export type SyncStatus = {
   enabled: boolean;
@@ -130,40 +131,85 @@ export function loadSyncCode(): string | null {
 function saveSyncCode(code: string | null, fromLiga = false): void {
   try {
     if (code) localStorage.setItem(STORAGE_KEY, JSON.stringify({ code, fromLiga }));
-    else localStorage.removeItem(STORAGE_KEY);
+    // Wyłączenie zapamiętujemy jawnie — inaczej przejęcie kodu z Ligi przy
+    // następnym starcie włączałoby synchronizację wbrew decyzji rodzica.
+    else localStorage.setItem(STORAGE_KEY, JSON.stringify({ code: null, optOut: true }));
   } catch {
     // brak localStorage — synchronizacja i tak nie ma sensu
   }
   emit({ enabled: Boolean(code), code, fromLiga, lastError: null, lastErrorDetail: null });
 }
 
-/**
- * Przejęcie kodu rodziny z Ligi Dźwięków, jeśli Akademia nie ma jeszcze
- * własnego. Skutek: urządzenie, na którym Liga jest sparowana, synchronizuje
- * też Akademię — bez QR, bez przepisywania, bez udziału rodzica. Skrzynki są
- * osobne (inny przedrostek), wspólny jest tylko kod rodziny.
- */
-export function adoptFromLiga(): boolean {
-  if (typeof window === "undefined" || loadSyncCode()) return false;
+function isOptedOut(): boolean {
   try {
-    const raw = localStorage.getItem(LIGA_SYNC_KEY);
-    const code = raw ? ((JSON.parse(raw) as { code?: string }).code ?? null) : null;
-    if (!code) return false;
-    saveSyncCode(code, true);
-    return true;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? Boolean((JSON.parse(raw) as { optOut?: boolean }).optOut) : false;
   } catch {
     return false;
   }
 }
 
+/** Kod rodziny Ligi Dźwięków na tym urządzeniu (tylko odczyt). */
+export function ligaSyncCode(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(LIGA_SYNC_KEY);
+    return raw ? ((JSON.parse(raw) as { code?: string }).code ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Włączenie synchronizacji: losujemy kod i od razu go zapisujemy. Celowo NIE
- * czekamy na sieć — link parowania ma się pojawić natychmiast, a pierwsza
- * wysyłka pojedzie w tle (i tak powtarza się co kilka minut).
+ * Przejęcie kodu rodziny z Ligi Dźwięków. Skutek: urządzenie, na którym Liga
+ * jest sparowana, synchronizuje też Akademię — bez QR, bez przepisywania.
+ * Skrzynki są osobne (inny przedrostek), wspólny jest tylko kod rodziny.
+ *
+ * Kod przejęty z Ligi idzie za Ligą: gdy rodzic zmieni tam obieg (nowy kod,
+ * link, krótki kod), Akademia przechodzi razem z nią — inaczej urządzenia po
+ * cichu rozjechałyby się na dwie skrzynki. Kodu ustawionego w Akademii ręcznie
+ * i jawnego wyłączenia nie ruszamy.
+ */
+export function adoptFromLiga(): boolean {
+  if (typeof window === "undefined") return false;
+  const liga = ligaSyncCode();
+  if (!liga) return false;
+  const own = loadSyncCode();
+  if (own === liga) return false;
+  if (own && !status.fromLiga) return false;
+  if (!own && isOptedOut()) return false;
+  saveSyncCode(liga, true);
+  return true;
+}
+
+/**
+ * Akademia ma własny kod, a Liga na tym urządzeniu inny: urządzenia mogą być
+ * w dwóch osobnych obiegach. Panel rodzica pokazuje wtedy ostrzeżenie.
+ */
+export function ligaCodeMismatch(): boolean {
+  if (!status.code || status.fromLiga) return false;
+  const liga = ligaSyncCode();
+  return Boolean(liga) && liga !== status.code;
+}
+
+/** Przejście na kod rodziny z Ligi (decyzja rodzica po ostrzeżeniu). */
+export function switchToLigaCode(): boolean {
+  const liga = ligaSyncCode();
+  if (!liga) return false;
+  saveSyncCode(liga, true);
+  return true;
+}
+
+/**
+ * Włączenie synchronizacji. Gdy na urządzeniu jest sparowana Liga, bierzemy
+ * jej kod rodziny (jeden obieg dla obu aplikacji); inaczej losujemy nowy i od
+ * razu go zapisujemy. Celowo NIE czekamy na sieć — link parowania ma się
+ * pojawić natychmiast, a pierwsza wysyłka pojedzie w tle.
  */
 export function enableSync(): string {
-  const code = newCode();
-  saveSyncCode(code);
+  const liga = ligaSyncCode();
+  const code = liga ?? newCode();
+  saveSyncCode(code, Boolean(liga));
   return code;
 }
 
@@ -347,7 +393,16 @@ async function pobierz(code: string): Promise<Wynik<ProgressState | null>> {
   const surowy = await readMailbox(adres(code));
   if (!surowy.ok) return surowy;
   if (!surowy.dane.trim()) return { ok: true, dane: null };
-  return { ok: true, dane: parseProgressFile(surowy.dane) };
+  const stan = parseProgressFile(surowy.dane);
+  if (!stan) {
+    // Stan z NOWSZEJ wersji aplikacji (inne urządzenie już się zaktualizowało):
+    // nie wolno go nadpisać starszym — to byłaby cicha utrata danych.
+    const wersja = progressVersionOf(surowy.dane);
+    if (wersja !== null && wersja > PROGRESS_SCHEMA_VERSION) {
+      return { ok: false, rodzaj: "nowsza-wersja", opis: `skrzynka w wersji ${wersja}` };
+    }
+  }
+  return { ok: true, dane: stan };
 }
 
 /**
@@ -410,7 +465,10 @@ function opisWyjatku(blad: unknown): string {
 function mamyWiecej(merged: ProgressState, zdalny: ProgressState): boolean {
   const znane = new Set(zdalny.sessions.map((s) => s.id));
   return (
-    merged.sessions.some((s) => !znane.has(s.id)) || merged.childName !== zdalny.childName
+    merged.sessions.some((s) => !znane.has(s.id)) ||
+    merged.childName !== zdalny.childName ||
+    (merged.childNameTs ?? 0) !== (zdalny.childNameTs ?? 0) ||
+    (merged.resetTs ?? 0) > (zdalny.resetTs ?? 0)
   );
 }
 

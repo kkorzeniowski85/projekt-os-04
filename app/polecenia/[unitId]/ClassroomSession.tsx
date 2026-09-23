@@ -14,7 +14,7 @@ export function ClassroomSession({ unitId }: { unitId: string }) {
       emoji={unit.emoji}
       goalPl={unit.goalPl}
       parentIntroPl={unit.parentIntroPl}
-      startNotePl="Z rodzicem dochodzą polecenia „w ruchu”: rodzic mówi, dziecko wykonuje."
+      startNotePl={unit.startNotePl}
       exitHref="/polecenia/"
       exitLabel="Język klasy"
       build={(mode) => unit.build(mode)}

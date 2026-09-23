@@ -45,11 +45,15 @@ export function Celebration({ big = false }: { big?: boolean }) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let width = 0;
     let height = 0;
+    // Bufor liczony z faktycznego rozmiaru płótna (CSS: w-full h-full). Bez
+    // rozmiaru w CSS płótno przyjmowało wymiary bufora (× devicePixelRatio) i
+    // na tabletach fajerwerki były 2× za duże, w połowie poza ekranem.
     function resize() {
-      width = window.innerWidth;
-      height = window.innerHeight;
-      canvas!.width = width * dpr;
-      canvas!.height = height * dpr;
+      const rect = canvas!.getBoundingClientRect();
+      width = rect.width || window.innerWidth;
+      height = rect.height || window.innerHeight;
+      canvas!.width = Math.round(width * dpr);
+      canvas!.height = Math.round(height * dpr);
       context!.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     resize();
@@ -169,7 +173,7 @@ export function Celebration({ big = false }: { big?: boolean }) {
   return (
     <canvas
       ref={canvasRef}
-      className="celebration-canvas pointer-events-none fixed inset-0 z-50"
+      className="pointer-events-none fixed inset-0 z-50 h-full w-full"
       aria-hidden
     />
   );

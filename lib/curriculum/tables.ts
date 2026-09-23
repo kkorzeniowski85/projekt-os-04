@@ -214,8 +214,8 @@ export const TABLE_TIPS: Record<number, string> = {
   6: "Razy 6: razy 5 i jeszcze jedna grupa — 6 × 7 = 35 + 7 = 42.",
   7: "Razy 7: razy 5 plus razy 2 — 7 × 8 = 40 + 16 = 56. Wierszyk: „5, 6, 7, 8 — 56 = 7 × 8”.",
   8: "Razy 8: podwój trzy razy — 8 × 6 → 12 → 24 → 48.",
-  9: "Razy 9: razy 10 minus jedna grupa — 9 × 7 = 70 − 7 = 63. Cyfry wyniku sumują się do 9 (6 + 3).",
-  10: "Razy 10: dopisz zero — 10 × 7 = 70.",
+  9: "Razy 9: razy 10 minus jedna grupa — 9 × 7 = 70 − 7 = 63. Sprawdzenie do 9 × 10: cyfry wyniku sumują się do 9 (6 + 3).",
+  10: "Razy 10: każda cyfra przesuwa się o jedno miejsce w lewo, a puste miejsce jedności zajmuje 0 — 7 × 10 = 70 (7 jedności → 7 dziesiątek). W angielskiej szkole nie mówi się „dopisz zero”.",
   11: "Razy 11 do 9: powtórz cyfrę — 11 × 4 = 44. Potem: 11 × 11 = 121, 11 × 12 = 132.",
   12: "Razy 12: razy 10 plus razy 2 — 12 × 7 = 70 + 14 = 84.",
 };

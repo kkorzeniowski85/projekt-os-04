@@ -94,7 +94,7 @@ export function ParentGate({ children }: { children: ReactNode }) {
         </button>
       </div>
 
-      <Link href="/" className="text-sm text-paper/60 underline">
+      <Link href="/" className="flex min-h-11 items-center px-4 text-sm text-paper/60 underline">
         ← Wróć do aplikacji
       </Link>
     </div>

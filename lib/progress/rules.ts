@@ -110,7 +110,7 @@ export function applySessionToUnits(
 }
 
 /** Ćwiczenia, których próby zmieniają stan faktów tabliczki. */
-const FACT_EXERCISES = new Set(["fact", "mtc"]);
+export const FACT_EXERCISES = new Set(["fact", "mtc"]);
 
 /**
  * Fakty po sesji. Próba trafia do faktu, jeśli dotyczy tabliczki („fact" w

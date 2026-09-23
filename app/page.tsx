@@ -38,29 +38,29 @@ export default function HomePage() {
       module: "tables",
       href: "/tabliczka/",
       title: "Tabliczka",
-      detail: `⚡ ${summary.fluent}/66 płynnie`,
+      detail: ready ? `⚡ ${summary.fluent}/66 płynnie` : "…",
     },
     {
       module: "maths",
       href: "/matematyka/",
       title: "Matematyka po angielsku",
-      detail: `${masteredIn(state, "maths", MATHS_TOPICS.map((t) => t.id))}/${MATHS_TOPICS.length} tematów`,
+      detail: ready ? `${masteredIn(state, "maths", MATHS_TOPICS.map((t) => t.id))}/${MATHS_TOPICS.length} opanowane` : "…",
     },
     {
       module: "reading",
       href: "/czytanie/",
       title: "Czytanie",
-      detail: `${masteredIn(state, "reading", READING_TEXTS.map((t) => t.id))}/${READING_TEXTS.length} tekstów`,
+      detail: ready ? `${masteredIn(state, "reading", READING_TEXTS.map((t) => t.id))}/${READING_TEXTS.length} opanowane` : "…",
     },
     {
       module: "tasks",
       href: "/polecenia/",
       title: "Język klasy",
-      detail: `${masteredIn(state, "tasks", CLASSROOM_UNITS.map((u) => u.id))}/${CLASSROOM_UNITS.length} tematów`,
+      detail: ready ? `${masteredIn(state, "tasks", CLASSROOM_UNITS.map((u) => u.id))}/${CLASSROOM_UNITS.length} opanowane` : "…",
     },
   ];
 
-  const allDone = mission.every((step) => step.done);
+  const allDone = ready && mission.every((step) => step.done);
 
   return (
     <div className={role === "desktop" ? "grid grid-cols-[1fr_340px] gap-8" : "flex flex-col gap-6"}>
@@ -69,7 +69,10 @@ export default function HomePage() {
           <div>
             <h1 className="text-3xl font-black sm:text-4xl">Akademia Ligi</h1>
             <p className="text-sm text-paper/60">
-              {ready ? `Kadet: ${state.childName}` : "Wczytywanie…"} · szkoła w Anglii {roughlyUntil(SCHOOL_START)}
+              {/* Odliczanie dopiero u klienta: w HTML z builda byłoby z dnia
+                  publikacji, a różnica wywołuje błąd hydratacji Reacta. */}
+              {ready ? `Kadet: ${state.childName}` : "Wczytywanie…"} · szkoła w Anglii{" "}
+              {ready ? roughlyUntil(SCHOOL_START) : "we wrześniu 2027"}
             </p>
           </div>
           {role !== "desktop" && (
@@ -83,7 +86,14 @@ export default function HomePage() {
           <p className="text-sm font-bold uppercase tracking-wide text-hero-gold">
             {allDone ? "Misja dnia wykonana! 🎉" : "Misja dnia"}
           </p>
-          <ol className="mt-3 flex flex-col gap-2">
+          {!ready && (
+            <div className="mt-3 flex flex-col gap-2" aria-hidden>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-16 animate-pulse rounded-2xl bg-white/10" />
+              ))}
+            </div>
+          )}
+          <ol className={`mt-3 flex flex-col gap-2 ${ready ? "" : "hidden"}`}>
             {mission.map((step, index) => (
               <li key={`${step.href}-${index}`}>
                 <Link
@@ -151,9 +161,9 @@ export default function HomePage() {
           <Card>
             <p className="text-sm font-bold text-hero-cyan">Multiplication Tables Check</p>
             <p className="text-2xl font-black">czerwiec 2028</p>
-            <p className="text-sm text-paper/70">{roughlyUntil(MTC_WINDOW_START)} · Year 4</p>
+            <p className="text-sm text-paper/70">{ready ? roughlyUntil(MTC_WINDOW_START) : "…"} · Year 4</p>
             <p className="mt-3 text-sm">
-              Płynnie: <strong>{summary.fluent}/66</strong> faktów
+              Płynnie: <strong>{ready ? summary.fluent : "…"}/66</strong> faktów
               {lastMock && (
                 <>
                   <br />

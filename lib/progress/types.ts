@@ -103,6 +103,14 @@ export type MockRecord = {
 export type ProgressState = {
   version: number;
   childName: string;
+  /** Kiedy rodzic ostatnio zmienił imię — rozstrzyga imię przy scalaniu. */
+  childNameTs: number;
+  /**
+   * Kiedy rodzic wyczyścił postęp (0 = nigdy). Rekordy starsze niż ta chwila
+   * są pomijane przy scalaniu — bez tego skasowany postęp wracał z chmury
+   * przy najbliższej synchronizacji.
+   */
+  resetTs: number;
   updatedTs: number;
   units: Record<string, UnitState>;
   facts: Record<string, FactState>;
@@ -120,13 +128,16 @@ export function unitKeyOf(module: ModuleId, unitId: string): string {
 }
 
 /**
- * Domyślna nazwa jest neutralna, bo repozytorium jest publiczne — prawdziwe
- * imię dziecka wpisuje się w trybie rodzica i zostaje na urządzeniu.
+ * Domyślna nazwa jest neutralna, bo repozytorium jest publiczne. Imię (albo
+ * pseudonim) wpisuje się w trybie rodzica; nie trafia do repozytorium, ale
+ * przy włączonej synchronizacji jedzie w skrzynce textdb.dev (sync.ts).
  */
 export function emptyProgress(childName = "Bohater"): ProgressState {
   return {
     version: PROGRESS_SCHEMA_VERSION,
     childName,
+    childNameTs: 0,
+    resetTs: 0,
     updatedTs: 0,
     units: {},
     facts: {},
@@ -152,18 +163,35 @@ export function emptyFactState(): FactState {
   return { box: 0, dueTs: 0, lastTs: 0, seen: 0, right: 0, lastMs: null, bestMs: null };
 }
 
+const MODULES = new Set<string>(["tables", "maths", "reading", "tasks"]);
+
 /**
  * Uzupełnia pola brakujące w stanie z zewnątrz (plik, skrzynka, starsza
  * wersja). Uzupełniamy zamiast odrzucać — dane dziecka nie znikają po cichu.
+ * Odrzucamy tylko rekordy spoza modelu Akademii (np. sesje Ligi Dźwięków z
+ * pomylonego pliku kopii): bez modułu nie da się ich policzyć ani pokazać.
  */
 export function normalizeProgress(state: ProgressState): ProgressState {
+  const named = typeof state.childName === "string" && state.childName !== "Bohater";
   return {
     ...emptyProgress(state.childName ?? "Bohater"),
     ...state,
+    // Imię wpisane przed wprowadzeniem znacznika wygrywa z domyślnym „Bohater".
+    childNameTs: typeof state.childNameTs === "number" ? state.childNameTs : named ? 1 : 0,
+    resetTs: typeof state.resetTs === "number" ? state.resetTs : 0,
     units: state.units && typeof state.units === "object" ? state.units : {},
     facts: state.facts && typeof state.facts === "object" ? state.facts : {},
     mocks: Array.isArray(state.mocks) ? state.mocks : [],
-    sessions: Array.isArray(state.sessions) ? state.sessions : [],
-    attempts: Array.isArray(state.attempts) ? state.attempts : [],
+    sessions: (Array.isArray(state.sessions) ? state.sessions : []).filter(
+      (session) =>
+        session &&
+        typeof session.id === "string" &&
+        MODULES.has(session.module) &&
+        typeof session.unitId === "string" &&
+        typeof session.kind === "string",
+    ),
+    attempts: (Array.isArray(state.attempts) ? state.attempts : []).filter(
+      (attempt) => attempt && typeof attempt.id === "string" && MODULES.has(attempt.module),
+    ),
   };
 }

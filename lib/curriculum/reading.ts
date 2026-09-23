@@ -201,7 +201,7 @@ export const READING_TEXTS: ReadingText[] = [
       { en: "Ruby drew a picture of a rainbow.", pl: "Ruby narysowała tęczę." },
       { en: "Some children read books on the carpet.", pl: "Niektóre dzieci czytały książki na dywanie." },
       { en: "When the bell rang, everyone helped to tidy up.", pl: "Kiedy zadzwonił dzwonek, wszyscy pomogli posprzątać." },
-      { en: "By lunchtime, the sun was shining again.", pl: "Do obiadu znów świeciło słońce." },
+      { en: "By lunchtime, the sun was shining again.", pl: "Przed obiadem znów wyszło słońce." },
     ],
     questions: [
       {
@@ -479,7 +479,7 @@ export const READING_TEXTS: ReadingText[] = [
       { en: "Then, spread butter on one side of each slice.", pl: "Potem posmaruj masłem jedną stronę każdej kromki." },
       { en: "After that, spread jam on top of the butter on one slice.", pl: "Następnie posmaruj dżemem masło na jednej kromce." },
       { en: "Finally, put the other slice on top, butter side down.", pl: "Na koniec połóż drugą kromkę na wierzchu, masłem do dołu." },
-      { en: "Cut your sandwich in half and enjoy it!", pl: "Przekrój kanapkę na pół i smacznego!" },
+      { en: "Your sandwich is ready. Enjoy it!", pl: "Kanapka gotowa. Smacznego!" },
     ],
     questions: [
       {
@@ -494,7 +494,7 @@ export const READING_TEXTS: ReadingText[] = [
       {
         id: "finally",
         type: "find",
-        en: "Find and copy the word that tells you this is the last step.",
+        en: "Find and copy the word that tells you it is the last step.",
         answers: ["finally"],
         skill: "vocabulary",
         explainPl: "„Finally” = na koniec. Instrukcje w Anglii prowadzą takie słowa: First, Next, Then, After that, Finally.",
@@ -542,7 +542,7 @@ export const READING_TEXTS: ReadingText[] = [
       { en: "They are clever and can find food almost anywhere.", pl: "Są sprytne i znajdą jedzenie niemal wszędzie." },
       { en: "Sometimes they look for leftovers in rubbish bins.", pl: "Czasem szukają resztek w koszach na śmieci." },
       { en: "Foxes are nocturnal, so you are more likely to see one at night.", pl: "Lisy są nocnymi zwierzętami, więc łatwiej spotkać je w nocy." },
-      { en: "A baby fox is called a cub.", pl: "Małe lisa to lisiątko (po angielsku „cub”)." },
+      { en: "A baby fox is called a cub.", pl: "Młode lisa to lisiątko (po angielsku „cub”)." },
     ],
     questions: [
       {

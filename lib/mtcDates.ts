@@ -22,7 +22,7 @@ export function roughlyUntil(date: Date, now = new Date()): string {
   if (date.getDate() < now.getDate()) months -= 1;
   if (months <= 0) {
     const days = daysUntil(date, now.getTime());
-    return days === 0 ? "już teraz" : `za ${days} dni`;
+    return days === 0 ? "już teraz" : days === 1 ? "jutro" : `za ${days} dni`;
   }
   const years = Math.floor(months / 12);
   const rest = months % 12;

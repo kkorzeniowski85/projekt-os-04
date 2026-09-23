@@ -18,12 +18,14 @@ import { numbersWithAudio } from "@/lib/curriculum/numbers";
 import { READING_TEXTS, readingPhrases } from "@/lib/curriculum/reading";
 import { parseFact, TABLES } from "@/lib/curriculum/tables";
 import { MTC_WINDOW_START, roughlyUntil, SCHOOL_START, daysUntil } from "@/lib/mtcDates";
-import { buildProgressExport, parseProgressFile, progressFileName } from "@/lib/progress/merge";
+import { pl } from "@/lib/pl";
+import { buildProgressExport, looksLikeLigaFile, parseProgressFile, progressFileName } from "@/lib/progress/merge";
 import {
   buildAttemptsCsv,
   buildMarkdownReport,
   buildSessionsCsv,
   downloadFile,
+  trainingDaysCount,
 } from "@/lib/progress/report";
 import { useProgress } from "@/lib/progress/store";
 import {
@@ -31,9 +33,11 @@ import {
   createShortCode,
   disableSync,
   enableSync,
+  ligaCodeMismatch,
   normalizeShortCode,
   pairingLink,
   subscribeSync,
+  switchToLigaCode,
   type SyncStatus,
 } from "@/lib/progress/sync";
 import { unitKeyOf, type ModuleId } from "@/lib/progress/types";
@@ -53,12 +57,7 @@ function ParentPanel() {
   const summary = tablesSummary(state.facts);
   const focus = focusTable(state.facts);
   const weak = weakestFacts(state.facts, 10);
-  const since = Date.now() - 28 * 24 * 60 * 60 * 1000;
-  const trainingDays = new Set(
-    state.sessions
-      .filter((session) => session.module === "tables" && session.kind === "practice" && session.endedTs >= since)
-      .map((session) => new Date(session.endedTs).toDateString()),
-  ).size;
+  const trainingDays = trainingDaysCount(state);
 
   return (
     <div className="flex flex-col gap-6 select-text">
@@ -76,7 +75,7 @@ function ParentPanel() {
         <h2 className="mb-2 text-lg font-bold">Plan: szkoła i Multiplication Tables Check</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <Stat label="Start w Anglii (Year 4)" value="wrzesień 2027" note={roughlyUntil(SCHOOL_START)} />
-          <Stat label="Okno MTC" value="czerwiec 2028" note={`${daysUntil(MTC_WINDOW_START)} dni`} />
+          <Stat label="Okno MTC" value="czerwiec 2028" note={pl(daysUntil(MTC_WINDOW_START), "dzień", "dni", "dni")} />
           <Stat label="Fakty płynnie" value={`${summary.fluent} / 66`} note={`${Math.round(summary.readiness * 100)}% gotowości`} />
         </div>
         <p className="mt-3 text-sm text-paper/75">
@@ -84,8 +83,9 @@ function ParentPanel() {
           tygodniu po ok. 5 minut. {focus ? `Teraz w centrum uwagi: ×${focus}.` : "Wszystkie tabliczki są już w drodze."}
         </p>
         <p className="mt-2 text-xs text-paper/55">
-          Jak czytać wynik: „płynnie” = dobrze i w 3,5 s w treningu, co najmniej kilka razy w odstępach
-          dni. W teście jest 6 s. Do czerwca 2028 jest dużo czasu — spokojne tempo (kilka nowych faktów
+          Jak czytać wynik: „płynnie” = dobrze i w 3,5 s przy kolejnych powtórkach w odstępach dni
+          (awans jest tylko za powtórkę w terminie, więc wymaga co najmniej trzech dni nauki). W teście
+          jest 6 s. Do czerwca 2028 jest dużo czasu — spokojne tempo (kilka nowych faktów
           tygodniowo) wystarczy z zapasem, pod warunkiem regularności.
         </p>
       </Card>
@@ -301,14 +301,41 @@ function SyncCard() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    const parsed = parseProgressFile(await file.text());
+    setMessage(null);
+
+    // Plik z Dysku Google na tablecie bywa niedostępny przy słabym łączu —
+    // bez try/catch przycisk „nic nie robił" (ta sama poprawka jest w Lidze).
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setMessage(
+        `Nie udało się otworzyć pliku „${file.name}”. Jeśli wybierasz go z Dysku Google, sprawdź połączenie z internetem i spróbuj ponownie.`,
+      );
+      return;
+    }
+    if (looksLikeLigaFile(text)) {
+      setMessage(
+        `„${file.name}” to kopia Ligi Dźwięków — wczytaj ją w Lidze (Panel rodzica → Wczytaj kopię). Kopie Akademii nazywają się akademia-ligi-postep-….json.`,
+      );
+      return;
+    }
+    const parsed = parseProgressFile(text);
     if (!parsed) {
-      setMessage("To nie jest plik postępu Akademii.");
+      setMessage(
+        `Plik „${file.name}” nie wygląda na kopię postępu Akademii. Szukaj pliku o nazwie akademia-ligi-postep-….json.`,
+      );
       return;
     }
     const added = importProgress(parsed);
-    setMessage(added > 0 ? `Scalono: doszło ${added} sesji.` : "Nic nowego — wszystkie sesje z pliku już tu były.");
+    setMessage(
+      added > 0
+        ? `Scalono: ${pl(added, "nowa sesja", "nowe sesje", "nowych sesji")}.`
+        : "Nic nowego — wszystkie sesje z pliku już tu były (albo pochodzą sprzed wyczyszczenia postępu).",
+    );
   }
+
+  const mismatch = sync?.enabled ? ligaCodeMismatch() : false;
 
   return (
     <Card>
@@ -323,8 +350,28 @@ function SyncCard() {
           {sync.fromLiga && (
             <p className="mb-3 rounded-2xl bg-hero-cyan/10 p-3 text-sm text-paper/85">
               🔗 Kod rodziny przejęty z Ligi Dźwięków na tym urządzeniu — Akademia synchronizuje się bez
-              osobnego parowania. Na innych urządzeniach, gdzie Liga jest sparowana, stanie się to samo.
+              osobnego parowania i idzie za Ligą, gdy tam zmienisz obieg.
             </p>
+          )}
+          {mismatch && (
+            <div className="mb-3 rounded-2xl bg-hero-gold/15 p-3 text-sm text-paper/85">
+              <p className="mb-2">
+                ⚠️ Liga Dźwięków na tym urządzeniu używa innego kodu rodziny niż Akademia — urządzenia mogą
+                być w dwóch osobnych obiegach. Najprościej przejść na kod Ligi (postęp z tego urządzenia
+                zostaje i trafi do wspólnej skrzynki).
+              </p>
+              <BigButton
+                tone="quiet"
+                onClick={() => {
+                  switchToLigaCode();
+                  setShortCode(null);
+                  requestSync();
+                  setMessage("Akademia używa teraz kodu rodziny z Ligi.");
+                }}
+              >
+                Użyj kodu z Ligi
+              </BigButton>
+            </div>
           )}
           {sync.lastError && (
             <p className="mb-3 rounded-2xl bg-hero-pink/15 p-3 text-sm text-paper/85">
@@ -332,6 +379,8 @@ function SyncCard() {
                 "Nie udało się połączyć z usługą synchronizacji — aplikacja spróbuje sama za chwilę. Jeśli to się powtarza, sprawdź blokery reklam/antywirus (adres textdb.dev)."}
               {sync.lastError === "usluga-odmowila" && "Usługa synchronizacji odmówiła — zwykle przejściowo. Postęp na urządzeniach jest bezpieczny."}
               {sync.lastError === "za-duzo-danych" && "Postęp przerósł pojemność skrzynki. Zapisz kopię do pliku i daj znać."}
+              {sync.lastError === "nowsza-wersja" &&
+                "Na innym urządzeniu działa nowsza wersja Akademii. Ta wersja nie nadpisze jej danych — pobierz najnowszą wersję (Ustawienia niżej), a synchronizacja ruszy sama."}
               {sync.lastErrorDetail && <span className="mt-1 block text-xs text-paper/50">Szczegół: {sync.lastErrorDetail}</span>}
             </p>
           )}
@@ -430,6 +479,10 @@ function SyncCard() {
           >
             Włącz automatyczną synchronizację
           </BigButton>
+          <p className="mt-2 text-xs text-paper/50">
+            Jeśli Liga Dźwięków jest na tym urządzeniu sparowana, Akademia użyje jej kodu rodziny. Inaczej
+            powstaje nowy, osobny obieg — gdy obieg już gdzieś działa, użyj raczej pola z kodem powyżej.
+          </p>
         </div>
       )}
 
@@ -512,7 +565,8 @@ function SettingsCard() {
     <Card>
       <h2 className="mb-3 text-lg font-bold">Ustawienia</h2>
       <label className="flex flex-col gap-2 text-sm">
-        Imię dziecka (zostaje na urządzeniach rodziny)
+        Imię lub pseudonim dziecka (przy włączonej synchronizacji przechodzi przez zewnętrzną usługę
+        textdb.dev — pseudonim wystarczy)
         <input
           value={state.childName}
           onChange={(event) => setChildName(event.target.value)}

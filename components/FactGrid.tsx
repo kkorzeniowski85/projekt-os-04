@@ -19,7 +19,7 @@ export const LEVEL_STYLE: Record<FactLevel, string> = {
 };
 
 export const LEVEL_LABEL: Record<FactLevel, string> = {
-  fluent: "płynnie (⚡ ≤ 3,5 s)",
+  fluent: "płynnie (⚡ w powtórkach)",
   learning: "w drodze",
   weak: "do powtórki",
   unseen: "jeszcze nie ćwiczone",

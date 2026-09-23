@@ -20,7 +20,10 @@ export default function TablesHubPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Tabliczka mnożenia" subtitle={`Multiplication Tables Check: czerwiec 2028 (${roughlyUntil(MTC_WINDOW_START)})`} />
+      <PageHeader
+        title="Tabliczka mnożenia"
+        subtitle={`Multiplication Tables Check: czerwiec 2028${ready ? ` (${roughlyUntil(MTC_WINDOW_START)})` : ""}`}
+      />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
         <Card className="flex flex-col gap-4">
@@ -31,7 +34,7 @@ export default function TablesHubPage() {
               <p className="text-2xl font-black">
                 ⚡ {ready ? summary.fluent : "…"} / {summary.total}
               </p>
-              <p className="text-sm text-paper/70">faktów płynnie (odpowiedź w 3,5 s)</p>
+              <p className="text-sm text-paper/70">faktów płynnie</p>
             </div>
           </div>
           <div className="h-3 w-full overflow-hidden rounded-full bg-white/10">
@@ -44,9 +47,11 @@ export default function TablesHubPage() {
             ⚡ Trening dnia
           </BigButton>
           <p className="text-sm text-paper/60">
-            {focus
-              ? `Teraz uczymy się tabliczki ×${focus}. Trening sam dobiera nowe fakty i powtórki.`
-              : "Wszystkie fakty są w drodze — trening pilnuje powtórek najsłabszych."}
+            {!ready
+              ? "…"
+              : focus
+                ? `Teraz dochodzą fakty z tabliczki ×${focus}. Trening sam dobiera nowe fakty i powtórki.`
+                : "Wszystkie fakty są już w nauce — trening pilnuje powtórek."}
           </p>
         </Card>
 
@@ -91,12 +96,12 @@ export default function TablesHubPage() {
                 key={table}
                 href={`/tabliczka/liczenie/${table}/`}
                 className={`flex flex-col items-center gap-1 rounded-blob p-3 transition active:translate-y-0.5 ${
-                  focus === table ? "bg-hero-blue ring-4 ring-hero-gold" : "bg-white/10"
+                  ready && focus === table ? "bg-hero-blue ring-4 ring-hero-gold" : "bg-white/10"
                 }`}
               >
                 <span className="text-3xl font-black">×{table}</span>
                 <span className="text-xs text-paper/70">
-                  ⚡ {per.fluent}/{per.total}
+                  ⚡ {ready ? per.fluent : "…"}/{per.total}
                 </span>
                 {unit && (
                   <span className={`rounded-full px-2 text-[10px] font-bold ${STATUS_STYLE[unit.status]}`}>
@@ -121,8 +126,10 @@ export default function TablesHubPage() {
           kłopot — od razu. Nowe fakty dochodzą tylko wtedy, gdy nie piętrzą się słabe.
         </p>
         <p>
-          „Płynnie” znaczy: dobrze i w 3,5 sekundy. W teście jest 6 sekund na przeczytanie, przypomnienie
-          i wpisanie — zapas jest na stres i palec, który trafi obok klawisza.
+          „Płynnie” znaczy: dobrze i w 3,5 sekundy przy kolejnych powtórkach w odstępach dni (po
+          dniu, potem po trzech) — jedna szybka odpowiedź to dopiero „w drodze”, a pomyłka cofa fakt do
+          powtórki. W teście jest 6 sekund na przeczytanie, przypomnienie i wpisanie — zapas jest na
+          stres i palec, który trafi obok klawisza.
         </p>
       </ParentTip>
     </div>

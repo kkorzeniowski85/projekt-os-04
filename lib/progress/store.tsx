@@ -63,7 +63,11 @@ type ProgressContextValue = {
   /** Dopóki false, dane z localStorage jeszcze się nie wczytały. */
   ready: boolean;
   state: ProgressState;
-  commitSession: (commit: SessionCommit) => SessionOutcome;
+  /**
+   * `flush`: zapis do localStorage od razu, nie w kolejnym renderze — przy
+   * zamykaniu strony (pagehide) render może już nie nastąpić.
+   */
+  commitSession: (commit: SessionCommit, options?: { flush?: boolean }) => SessionOutcome;
   /** Scala postęp z pliku (unia sesji). Zwraca liczbę dodanych sesji. */
   importProgress: (incoming: ProgressState) => number;
   setChildName: (name: string) => void;
@@ -184,13 +188,14 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
 
   // Wysyłka po każdej zmianie postępu (z odstępem, żeby seria zmian poszła raz).
   useEffect(() => {
-    if (!ready || state.sessions.length === 0) return;
+    // Po „Wyczyść postęp" też trzeba wysłać — inaczej skrzynka oddałaby stary stan.
+    if (!ready || (state.sessions.length === 0 && !state.resetTs)) return;
     const timer = setTimeout(runSync, 2000);
     return () => clearTimeout(timer);
   }, [state, ready, runSync]);
 
   const commitSession = useCallback(
-    (commit: SessionCommit): SessionOutcome => {
+    (commit: SessionCommit, options?: { flush?: boolean }): SessionOutcome => {
       const attempts: Attempt[] = commit.attempts.map((attempt) => ({
         ...attempt,
         id: newId(),
@@ -221,6 +226,7 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
         (key) => (after.facts[key]?.box ?? 0) >= 4 && (before.facts[key]?.box ?? 0) < 4,
       );
 
+      if (options?.flush) save(after);
       update((previous) => commitToState(previous, session, attempts));
 
       return {
@@ -243,12 +249,20 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
   );
 
   const setChildName = useCallback(
-    (name: string) => update((previous) => ({ ...previous, childName: name })),
+    (name: string) => update((previous) => ({ ...previous, childName: name, childNameTs: Date.now() })),
     [update],
   );
 
+  // Znacznik resetu rozchodzi się przez synchronizację: pozostałe urządzenia
+  // przy scaleniu odrzucą wszystko sprzed tej chwili.
   const resetAll = useCallback(
-    () => update((previous) => emptyProgress(previous.childName)),
+    () =>
+      update((previous) => ({
+        ...emptyProgress(previous.childName),
+        childNameTs: previous.childNameTs,
+        resetTs: Date.now(),
+        updatedTs: Date.now(),
+      })),
     [update],
   );
 
