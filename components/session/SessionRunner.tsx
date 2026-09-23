@@ -71,7 +71,12 @@ export function SessionRunner(props: SessionRunnerProps) {
     bonusFor:
       props.bonus === false
         ? undefined
-        : (exercise) => ({ ...exercise, id: `${exercise.id}-bonus` }),
+        : (exercise) => ({
+            ...exercise,
+            id: `${exercise.id}-bonus`,
+            // W bonusie fakt nie jest już „nowy" — dziecko właśnie go ćwiczyło.
+            ...(exercise.exercise === "fact" ? { heading: undefined } : {}),
+          }),
   });
 
   if (flow.stage === "intro") {
