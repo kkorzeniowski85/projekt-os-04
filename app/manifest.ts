@@ -12,7 +12,7 @@ export default function manifest(): MetadataRoute.Manifest {
     // `id` odróżnia instalację Akademii od Ligi Dźwięków — obie stoją na tej
     // samej domenie i bez tego telefon mógłby je potraktować jak jedną apkę.
     id: `${base}/`,
-    name: "Akademia Ligi — gotowi do angielskiej szkoły",
+    name: "Akademia Ligi",
     short_name: "Akademia Ligi",
     description:
       "Tabliczka mnożenia pod Multiplication Tables Check, matematyka po angielsku, czytanie ze zrozumieniem i język klasy",

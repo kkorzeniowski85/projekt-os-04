@@ -142,7 +142,7 @@ function Intro({
       <p className="text-6xl">📝</p>
       <h1 className="text-3xl font-black">Próbny test MTC</h1>
       <p className="max-w-lg text-lg text-paper/85">
-        Tak jak w szkole w Year 4: {MTC.questions} działań, {MTC.answerMs / 1000} sekund na każde.
+        {MTC.questions} działań, {MTC.answerMs / 1000} sekund na każde.
         Najpierw {MTC.practiceQuestions} pytania na rozgrzewkę. Wpisz wynik i naciśnij Enter.
       </p>
       {lastScores.length > 0 && (

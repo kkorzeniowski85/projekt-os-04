@@ -155,7 +155,7 @@ export function buildCountingSession(table: number): Exercise[] {
     visual: { kind: "array", rows: lots, cols: table, emoji: table > 8 ? "🔹" : "🔵" },
     promptEn: `${lots} lots of ${table} is ${lots * table}.`,
     sound: say(`${lots} lots of ${table} is ${lots * table}.`),
-    bodyPl: `${pl(lots, "rząd", "rzędy", "rzędów")} po ${pl(table, "kropka", "kropki", "kropek")}: ${lots} × ${table} = ${lots * table}. Na lekcji w Anglii to samo działanie usłyszysz na kilka sposobów:`,
+    bodyPl: `${pl(lots, "rząd", "rzędy", "rzędów")} po ${pl(table, "kropka", "kropki", "kropek")}: ${lots} × ${table} = ${lots * table}. Po angielsku to samo działanie mówi się na kilka sposobów:`,
     examples: [
       { en: `${lots} lots of ${table}`, pl: `${lots} × ${table}` },
       { en: `${lots} groups of ${table}`, pl: `${lots} × ${table}` },

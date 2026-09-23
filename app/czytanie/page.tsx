@@ -13,7 +13,7 @@ export default function ReadingHubPage() {
           <h2 className="text-lg font-black text-paper/80">
             Poziom {level}
             <span className="ml-2 text-sm font-normal text-paper/50">
-              {level === 1 ? "krótkie zdania" : level === 2 ? "dłuższe teksty" : "tekst jak w Year 3–4"}
+              {level === 1 ? "krótkie zdania" : level === 2 ? "dłuższe teksty" : "najdłuższe teksty"}
             </span>
           </h2>
           <UnitList

@@ -6,7 +6,6 @@ import { HeroAvatar } from "@/components/HeroAvatar";
 import { BigButton, Card, PageHeader, ParentTip, STATUS_STYLE } from "@/components/ui";
 import { LEARNING_ORDER, MTC } from "@/lib/curriculum/tables";
 import { HEROES_BY_MODULE } from "@/lib/heroes";
-import { MTC_WINDOW_START, roughlyUntil } from "@/lib/mtcDates";
 import { useProgress } from "@/lib/progress/store";
 import { unitKeyOf } from "@/lib/progress/types";
 import { focusTable, tablesSummary } from "@/lib/tables/practice";
@@ -20,10 +19,7 @@ export default function TablesHubPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Tabliczka mnożenia"
-        subtitle={`Multiplication Tables Check: czerwiec 2028${ready ? ` (${roughlyUntil(MTC_WINDOW_START)})` : ""}`}
-      />
+      <PageHeader title="Tabliczka mnożenia" subtitle="SPEED · trening, liczenie skokami, próbny test" />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
         <Card className="flex flex-col gap-4">

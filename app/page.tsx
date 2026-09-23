@@ -1,8 +1,11 @@
 "use client";
 
 /**
- * Baza Akademii: misja dnia, cztery działy, odliczanie do szkoły i do MTC.
- * Na komputerze obok jest kolumna rodzica ze skrótem postępu.
+ * Baza Akademii: misja dnia i cztery działy. Na komputerze obok jest kolumna
+ * rodzica ze skrótem postępu.
+ *
+ * Celowo bez odliczania do szkoły i bez dat — prośba rodzica: ekran dziecka
+ * nie przypomina o przeprowadzce. Plan z datami jest w panelu rodzica.
  */
 
 import Link from "next/link";
@@ -14,7 +17,6 @@ import { MATHS_TOPICS } from "@/lib/curriculum/maths";
 import { READING_TEXTS } from "@/lib/curriculum/reading";
 import { HEROES_BY_MODULE } from "@/lib/heroes";
 import { dailyMission } from "@/lib/mission";
-import { MTC_WINDOW_START, roughlyUntil, SCHOOL_START } from "@/lib/mtcDates";
 import { useProgress } from "@/lib/progress/store";
 import { unitKeyOf, type ModuleId, type ProgressState } from "@/lib/progress/types";
 import { tablesSummary } from "@/lib/tables/practice";
@@ -68,12 +70,7 @@ export default function HomePage() {
         <header className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black sm:text-4xl">Akademia Ligi</h1>
-            <p className="text-sm text-paper/60">
-              {/* Odliczanie dopiero u klienta: w HTML z builda byłoby z dnia
-                  publikacji, a różnica wywołuje błąd hydratacji Reacta. */}
-              {ready ? `Kadet: ${state.childName}` : "Wczytywanie…"} · szkoła w Anglii{" "}
-              {ready ? roughlyUntil(SCHOOL_START) : "we wrześniu 2027"}
-            </p>
+            <p className="text-sm text-paper/60">{ready ? `Kadet: ${state.childName}` : "Wczytywanie…"}</p>
           </div>
           {role !== "desktop" && (
             <Link href="/rodzic/" className="flex min-h-11 items-center rounded-full bg-white/10 px-5 text-sm">
@@ -159,10 +156,8 @@ export default function HomePage() {
       {role === "desktop" && (
         <aside className="flex flex-col gap-4">
           <Card>
-            <p className="text-sm font-bold text-hero-cyan">Multiplication Tables Check</p>
-            <p className="text-2xl font-black">czerwiec 2028</p>
-            <p className="text-sm text-paper/70">{ready ? roughlyUntil(MTC_WINDOW_START) : "…"} · Year 4</p>
-            <p className="mt-3 text-sm">
+            <p className="text-sm font-bold text-hero-cyan">Tabliczka</p>
+            <p className="mt-1 text-sm">
               Płynnie: <strong>{ready ? summary.fluent : "…"}/66</strong> faktów
               {lastMock && (
                 <>
