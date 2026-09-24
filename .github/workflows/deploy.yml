@@ -22,23 +22,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      # Na Pages aplikacja stoi pod /<nazwa-repo>/, więc build musi znać ten
-      # przedrostek. Bierzemy go z nazwy repozytorium — działa też po zmianie
-      # nazwy albo w forku.
-      - name: Build (eksport statyczny)
-        run: npm run build
-        env:
-          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
-          # Krótki znacznik wersji widoczny w trybie rodzica — pozwala od ręki
-          # sprawdzić, czy urządzenie ma najnowszą wersję, czy starą z pamięci.
-          NEXT_PUBLIC_BUILD_ID: ${{ github.sha }}
+      # Akademia jest teraz działem Ligi (projekt-os-02). Pod tym adresem stoi
+      # już tylko przekierowanie (redirect/): strona, która przenosi każdy
+      # dawny adres na ten sam w Lidze, oraz sw.js sprzątający dawny service
+      # worker Akademii. Kod Akademii zostaje w repozytorium jako historia;
+      # powrót do osobnej aplikacji = tag przed-polaczeniem (docs Ligi:
+      # docs/polaczenie.md).
+      - name: Strona przekierowania
+        run: |
+          mkdir -p out
+          cp redirect/index.html redirect/sw.js out/
+          cp redirect/index.html out/404.html
 
       # Pages muszą być już włączone w ustawieniach repozytorium (źródło:
       # GitHub Actions). Token workflow nie ma prawa włączyć ich sam.

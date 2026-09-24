@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Akademia jest teraz w Lidze</title>
+    <script>
+      // Akademia Ligi jest teraz działem Ligi (projekt-os-02). Ten sam adres
+      // w Lidze: /projekt-os-04/tabliczka/ → /projekt-os-02/tabliczka/, razem
+      // z ?… i #… (link parowania #sync=… działa dalej). Plik służy też jako
+      // 404.html, więc przekierowuje każdą dawną podstronę.
+      (function () {
+        var FROM = "/projekt-os-04";
+        var TO = "/projekt-os-02";
+        var path = location.pathname;
+        var rest = path.indexOf(FROM) === 0 ? path.slice(FROM.length) : "/";
+        rest = rest.replace(/(index|404)\.html$/, "");
+        if (rest.charAt(0) !== "/") rest = "/" + rest;
+        var target = TO + rest + location.search + location.hash;
+        var done = false;
+        function go() {
+          if (done) return;
+          done = true;
+          location.replace(target);
+        }
+        // Sprzątanie po dawnej Akademii: jej service worker i WYŁĄCZNIE jej
+        // pamięć podręczna (przedrostek akademia-ligi-). Dane dziecka
+        // (localStorage school.*) zostają — czyta je Liga, ta sama domena.
+        var cleanup = [];
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+            cleanup.push(
+              navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                return Promise.all(
+                  registrations
+                    .filter(function (registration) {
+                      return new URL(registration.scope).pathname === FROM + "/";
+                    })
+                    .map(function (registration) {
+                      return registration.unregister();
+                    }),
+                );
+              }),
+            );
+          }
+          if (window.caches && caches.keys) {
+            cleanup.push(
+              caches.keys().then(function (keys) {
+                return Promise.all(
+                  keys
+                    .filter(function (key) {
+                      return key.indexOf("akademia-ligi-") === 0;
+                    })
+                    .map(function (key) {
+                      return caches.delete(key);
+                    }),
+                );
+              }),
+            );
+          }
+        } catch (error) {
+          // Sprzątanie jest dodatkiem — przejście do Ligi ma nastąpić zawsze.
+        }
+        Promise.all(cleanup).then(go, go);
+        setTimeout(go, 1500);
+      })();
+    </script>
+  </head>
+  <body style="margin: 0; padding: 48px 16px; font-family: system-ui, sans-serif; background: #10163a; color: #f5f1e6; text-align: center">
+    <p>Akademia jest teraz częścią Ligi.</p>
+    <p><a href="/projekt-os-02/" style="color: #ffd166">Przejdź do Ligi</a></p>
+    <noscript><meta http-equiv="refresh" content="0; url=/projekt-os-02/" /></noscript>
+  </body>
+</html>
