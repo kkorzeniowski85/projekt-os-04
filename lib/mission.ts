@@ -75,24 +75,76 @@ function nextUnit(state: ProgressState, module: Exclude<ModuleId, "tables">) {
  * do tabliczki, z której trening wprowadza teraz nowe fakty, włącznie — która
  * nie ma jeszcze lekcji z oceną. Gdy wszystkie fakty już weszły, pierwsza
  * tabliczka bez lekcji w ogóle (żeby ×12 też kiedyś wypadła).
+ *
+ * „Plan dnia" bierze nowe fakty tylko z focusTable (practice.ts), więc
+ * najbliższy trening nie sięgnie dalej niż ta granica: lekcja nowej tabliczki
+ * pojawia się tu, zanim trening wprowadzi pierwszy jej fakt. Dlatego lekcja
+ * samej focusTable idzie przed zaległymi wcześniejszymi (pominiętymi albo
+ * ominiętymi, gdy rodzic ćwiczył inne tabliczki w trybie jednej tabliczki).
  */
 export function nextCountingLesson(state: ProgressState): number | null {
   const focus = focusTable(state.facts);
   const lastIndex = focus ? LEARNING_ORDER.indexOf(focus as (typeof LEARNING_ORDER)[number]) : LEARNING_ORDER.length - 1;
-  const lessonDone = (table: number) => {
-    const unit = state.units[unitKeyOf("tables", `count-${table}`)];
-    return Boolean(unit) && unit.status !== "new";
-  };
+  const lessonDone = (table: number) => countingLessonDone(state, table);
+  if (focus && !lessonDone(focus)) return focus;
   return LEARNING_ORDER.slice(0, lastIndex + 1).find((table) => !lessonDone(table)) ?? null;
+}
+
+/** Czy lekcja „Liczymy co N" ma już ocenę (była zaliczona choć raz). */
+export function countingLessonDone(state: ProgressState, table: number): boolean {
+  const unit = state.units[unitKeyOf("tables", `count-${table}`)];
+  return Boolean(unit) && unit.status !== "new";
+}
+
+/**
+ * Tabliczka, z której „Plan dnia" dziś nie wprowadza już nowych faktów: ta w
+ * centrum uwagi (focusTable), bez lekcji „Liczymy co N", gdy dziś był już
+ * trening. Główny przypadek: trening właśnie skończył poprzednią tabliczkę —
+ * kolejny trening tego dnia („Jeszcze raz" na ekranie nagrody, wieczorny) nie
+ * wchodzi w nową tabliczkę przed jej lekcją, tylko robi powtórki, a ekran
+ * treningu proponuje lekcję. To samo, gdy część jej faktów weszła wcześniej
+ * bez lekcji (trening jednej tabliczki, pominięta lekcja): bez lekcji nowe
+ * fakty najwyżej w pierwszym treningu dnia. Ten pierwszy trening wprowadza je
+ * zawsze (misja stawia wtedy lekcję jako krok 1), więc nauka nigdy nie staje.
+ * ×2 nigdy nie czeka: przed nią nie ma czego powtarzać.
+ */
+export function heldNewTable(state: ProgressState, now = Date.now()): number | null {
+  const focus = focusTable(state.facts);
+  if (!focus || focus === LEARNING_ORDER[0] || countingLessonDone(state, focus)) return null;
+  const trainedToday = state.sessions.some(
+    // Ten sam próg co krok „Trening" w misji: przerwany po dwóch pytaniach
+    // trening się nie liczy, więc następny może jeszcze wprowadzać fakty.
+    (session) => session.module === "tables" && session.kind === "practice" && isToday(session.endedTs, now) && counts(session),
+  );
+  return trainedToday ? focus : null;
 }
 
 export function dailyMission(state: ProgressState, now = Date.now()): MissionStep[] {
   const today = state.sessions.filter((session) => isToday(session.endedTs, now) && counts(session));
   const steps: MissionStep[] = [];
 
-  // Krok 1: lekcja nowej tabliczki (zrobiona dziś zostaje na liście z ✅).
-  const lessonToday = today.find((session) => session.module === "tables" && session.kind === "count");
-  const lessonTable = lessonToday ? Number(lessonToday.unitId.replace("count-", "")) : nextCountingLesson(state);
+  // Krok 1: lekcja nowej tabliczki (zrobiona dziś zostaje na liście z ✅ —
+  // ostatnia zrobiona, gdy dziecko zrobiło dziś więcej niż jedną).
+  // Dzisiejszą zrobioną wypiera tylko lekcja focusTable przed dzisiejszym
+  // treningiem (ten wprowadziłby jej pierwsze fakty). Po treningu już nie:
+  // kolejny trening tego dnia nie zaczyna nowej tabliczki bez lekcji
+  // (heldNewTable), więc lekcja czeka do jutra, a misja wykonana razem z
+  // lekcją nie wraca do „niewykonanej". Zaległe lekcje wcześniejszych
+  // tabliczek (ich fakty już weszły) też czekają do jutra — jedna lekcja
+  // dziennie domyka misję. Bez lekcji dziś lekcję, którą odsłonił dzisiejszy
+  // trening, widać od razu (można ją zrobić jeszcze dziś).
+  const lessonToday = today
+    .filter((session) => session.module === "tables" && session.kind === "count")
+    .reduce<SessionRecord | undefined>((latest, session) => (!latest || session.endedTs >= latest.endedTs ? session : latest), undefined);
+  const trainedToday = today.some((session) => session.module === "tables" && session.kind === "practice");
+  const pendingLesson = nextCountingLesson(state);
+  const gating = pendingLesson !== null && pendingLesson === focusTable(state.facts) && !trainedToday;
+  const showPending = pendingLesson !== null && (gating || !lessonToday);
+  const lessonTable = showPending
+    ? pendingLesson
+    : lessonToday
+      ? Number(lessonToday.unitId.replace("count-", ""))
+      : null;
   if (lessonTable) {
     steps.push({
       module: "tables",
@@ -100,7 +152,7 @@ export function dailyMission(state: ProgressState, now = Date.now()): MissionSte
       title: `Liczymy co ${lessonTable}`,
       subtitle: "nowa tabliczka — najpierw zrozumieć",
       href: `/tabliczka/liczenie/${lessonTable}/`,
-      done: Boolean(lessonToday),
+      done: !showPending && Boolean(lessonToday),
     });
   }
 
@@ -111,7 +163,7 @@ export function dailyMission(state: ProgressState, now = Date.now()): MissionSte
     title: "Trening tabliczki",
     subtitle: "ok. 5 minut",
     href: "/tabliczka/trening/",
-    done: today.some((session) => session.module === "tables" && session.kind === "practice"),
+    done: trainedToday,
   });
 
   // Krok 3: dział, który najdłużej czekał (zrobiony dziś zostaje jako „zrobione").

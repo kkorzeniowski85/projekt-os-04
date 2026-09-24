@@ -26,10 +26,8 @@ import {
 import { emptyFactState, type FactState, type SessionKind } from "@/lib/progress/types";
 
 export const FACT_RULES = {
-  /** Odpowiedź do tej granicy liczy się jako płynna. */
+  /** Odpowiedź do tej granicy liczy się jako szybka (⚡). Limit testu: MTC.answerMs. */
   fastMs: 3500,
-  /** Limit MTC — po nim w teście odpowiedź przepada. */
-  limitMs: 6000,
   maxBox: 5,
   /** Odstęp powtórki dla pudełka 0–5, w dniach. */
   intervalsDays: [0, 0, 1, 3, 7, 21],
@@ -43,6 +41,9 @@ export const FACT_RULES = {
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/** Tryb „jedna tabliczka": najmniej różnych faktów w sesji (patrz buildPracticeSet). */
+const TABLE_MODE_MIN_FACTS = 6;
+
 export type FactOutcome = { correct: boolean; ms: number; ts: number };
 
 /**
@@ -51,9 +52,24 @@ export type FactOutcome = { correct: boolean; ms: number; ts: number };
  */
 const DUE_SLACK_MS = DAY / 2;
 
-/** Czy fakt czeka na powtórkę: nowy albo termin minął. */
+/**
+ * Czy fakt czeka na powtórkę: nowy albo termin minął.
+ *
+ * Termin z tolerancją, ale najwcześniej od północy dnia terminu: trening
+ * następnego dnia o 7:00 po wieczornym o 19:00 się liczy, a rano i wieczorem
+ * tego samego dnia już nie — inaczej „po dniu" dało się zaliczyć tego samego
+ * dnia i fakt był „płynny" po dwóch dniach nauki. Pudełko 1 (odstęp 0) dalej
+ * jest zawsze w terminie.
+ *
+ * Północ UTC, nie lokalna: scalanie odtwarza stan faktów z prób z różnych
+ * urządzeń (merge.ts) i wynik musi być ten sam niezależnie od strefy czasowej
+ * urządzenia. W Anglii i w Polsce północ UTC wypada między 0:00 a 2:00 w nocy,
+ * kiedy nikt nie ćwiczy, więc dzień UTC = dzień nauki dziecka.
+ */
 export function isFactDue(state: FactState | undefined, now: number): boolean {
-  return !state || state.box === 0 || state.dueTs - DUE_SLACK_MS <= now;
+  if (!state || state.box === 0) return true;
+  const dueDayStart = Math.floor(state.dueTs / DAY) * DAY;
+  return Math.max(state.dueTs - DUE_SLACK_MS, dueDayStart) <= now;
 }
 
 /**
@@ -69,7 +85,13 @@ export function isFactDue(state: FactState | undefined, now: number): boolean {
  *  - fakt płynny odpowiedziany poprawnie, ale wolno, przestaje być płynny
  *    (w MTC liczenie na palcach to 0 punktów) — także w próbnym teście;
  *  - próbny test MTC tylko obniża. Jedno trafienie w teście niczego nie
- *    „zalicza" i nie przesuwa terminu powtórki.
+ *    „zalicza" i nie przesuwa terminu powtórki — także przy obniżeniu:
+ *    zaległy fakt, który w teście wyszedł wolno, idzie na najbliższy trening;
+ *  - test nie wprowadza faktów, których trening jeszcze nie zaczął (pudełko 0):
+ *    błąd zostaje w seen/right (raport i panel go pokazują), a fakt wejdzie
+ *    razem ze swoją tabliczką, po lekcji „Liczymy co N". Bez tego test na
+ *    starcie wrzucał do pudełka 1 kilkanaście faktów ×6–×12 naraz, które
+ *    zapychały trening i zamykały bramkę nowych faktów.
  */
 export function nextFactState(
   previous: FactState | undefined,
@@ -82,12 +104,15 @@ export function nextFactState(
   let box = base.box;
   let dueTs = base.dueTs;
 
-  if (!outcome.correct) {
+  if (kind === "mock" && box === 0) {
+    // Nieprzerobiony fakt: tylko licznik prób (niżej).
+  } else if (!outcome.correct) {
     box = 1;
     dueTs = outcome.ts + FACT_RULES.intervalsDays[1] * DAY;
   } else if (!fast && box >= FACT_RULES.fluentBox) {
     box = FACT_RULES.fluentBox - 1;
     dueTs = outcome.ts + FACT_RULES.intervalsDays[box] * DAY;
+    if (kind === "mock") dueTs = Math.min(base.dueTs, dueTs);
   } else if (kind !== "mock" && due) {
     box = fast ? Math.min(FACT_RULES.maxBox, Math.max(box, 1) + 1) : Math.max(box, 1);
     dueTs = outcome.ts + FACT_RULES.intervalsDays[box] * DAY;
@@ -152,7 +177,11 @@ function orient(key: FactKey, random: () => number): Question {
  * Pytania na jeden trening. Skład:
  *  1. słabe i zaległe fakty (pudełko 1+, termin minął) — najniższe pudełka
  *     pierwsze, bo to one najbardziej potrzebują powtórki;
- *  2. do `newPerSession` nowych faktów z tabliczki w centrum uwagi;
+ *  2. do `newPerSession` nowych faktów TYLKO z tabliczki w centrum uwagi
+ *     (focusTable). Trening nie przeskakuje na następną tabliczkę w połowie
+ *     sesji: następna wchodzi od kolejnego treningu — tego samego dnia dopiero
+ *     po swojej lekcji „Liczymy co N" (`holdNew`), następnego dnia misja
+ *     stawia tę lekcję jako krok 1 (najpierw zrozumieć);
  *  3. kilka płynnych faktów „dla pewności siebie" — dziecko, które trafia
  *     tylko na trudne, szybko się zniechęca (i przy okazji przypomina sobie
  *     starsze fakty, zanim wypadną z pamięci).
@@ -161,16 +190,20 @@ function orient(key: FactKey, random: () => number): Question {
  *
  * `table` = tryb „ćwicz jedną tabliczkę" wybrany przez rodzica: wtedy pula to
  * pełna tabliczka „razy t", niezależnie od kolejności nauki.
+ *
+ * `holdNew` („Plan dnia") = bez nowych faktów: następna tabliczka czeka na
+ * swoją lekcję (heldNewTable w mission.ts), trening robi same powtórki.
  */
 export function buildPracticeSet(
   facts: Record<FactKey, FactState>,
-  options: { size: number; now: number; table?: number | null; random?: () => number },
+  options: { size: number; now: number; table?: number | null; holdNew?: boolean; random?: () => number },
 ): Question[] {
   const random = options.random ?? Math.random;
   const { size, now } = options;
   const pool = options.table ? factsOfTable(options.table) : ALL_FACTS;
 
-  const started = pool.filter((key) => (facts[key]?.box ?? 0) >= 1);
+  const allStarted = ALL_FACTS.filter((key) => (facts[key]?.box ?? 0) >= 1);
+  const started = options.table ? pool.filter((key) => (facts[key]?.box ?? 0) >= 1) : allStarted;
   // Zaległe = termin powtórki minął, łącznie z płynnymi: bez tego fakt płynny
   // nigdy nie wracałby na zaplanowaną powtórkę i wypadałby z pamięci po cichu.
   // Kolejność: najpierw pudełko 1 (to, co się sypie), potem najbardziej
@@ -182,16 +215,24 @@ export function buildPracticeSet(
     .filter((key) => isFactDue(facts[key], now))
     .sort((a, b) => Number(facts[b].box === 1) - Number(facts[a].box === 1) || overdue(b) - overdue(a));
 
-  // Nowe fakty tabliczka po tabliczce, w kolejności nauki (albo z tabliczki
-  // wybranej przez rodzica).
-  const fresh = freshFacts(facts, options.table);
+  // Nowe fakty: w „Planie dnia" tylko z tabliczki w centrum uwagi (kolejne
+  // tabliczki po kolei, każda po swojej lekcji), w trybie jednej tabliczki —
+  // z tabliczki wybranej przez rodzica.
+  const focus = focusTable(facts);
+  const fresh = options.table
+    ? freshFacts(facts, options.table)
+    : freshFacts(facts).filter((key) => introducedWith(key) === focus);
 
   // BRAMKA POJEMNOŚCI: nowe fakty tylko wtedy, gdy nie piętrzą się słabe.
   // Bez niej trening dokładał nowe codziennie i po dziesięciu dniach dziecko
   // miało kilkadziesiąt faktów „w powietrzu" naraz (wyszło w symulacji).
-  const weak = started.filter((key) => facts[key].box === 1).length;
+  // Liczona zawsze z CAŁEGO stanu: w trybie jednej tabliczki zaczętych faktów
+  // tej tabliczki jest zwykle kilka, więc bramka liczona w jej obrębie zawsze
+  // widziała „start nauki" i dokładała 8 nowych naraz.
+  const weak = allStarted.filter((key) => facts[key].box === 1).length;
+  const allDue = options.table ? allStarted.filter((key) => isFactDue(facts[key], now)).length : due.length;
   let newQuota: number =
-    started.length < FACT_RULES.maxNewPerSession
+    allStarted.length < FACT_RULES.maxNewPerSession
       ? FACT_RULES.maxNewPerSession // start nauki: jest z czego zbudować trening
       : weak >= 8
         ? 0 // najpierw utrwalić to, co się sypie
@@ -200,10 +241,15 @@ export function buildPracticeSet(
           : FACT_RULES.newPerSession;
   // Zaległe powtórki to też obciążenie: gdy jest ich tyle, ile mieści sesja
   // (na telefonie tylko 12 pytań), nowe fakty czekają.
-  if (started.length >= FACT_RULES.maxNewPerSession) {
-    if (due.length >= size) newQuota = 0;
-    else if (due.length >= size / 2) newQuota = Math.min(newQuota, 2);
+  if (allStarted.length >= FACT_RULES.maxNewPerSession) {
+    if (allDue >= size) newQuota = 0;
+    else if (allDue >= size / 2) newQuota = Math.min(newQuota, 2);
   }
+  // Tryb jednej tabliczki: co najmniej 6 różnych faktów (z drugą turą ≥ 12
+  // pytań). Sama bramka dawała tu sesje z 0–4 pytań, gdy tabliczka jest
+  // prawie nieruszona, a w całym stanie piętrzą się słabe.
+  if (options.table) newQuota = Math.max(newQuota, TABLE_MODE_MIN_FACTS - started.length);
+  else if (options.holdNew) newQuota = 0;
 
   const notDueFluent = shuffle(
     started.filter((key) => facts[key].box >= FACT_RULES.fluentBox && facts[key].dueTs > now),
@@ -292,7 +338,9 @@ export function tablesSummary(facts: Record<FactKey, FactState>): TablesSummary 
  * Najsłabsze fakty — do raportu i panelu rodzica. Pomija fakty z pudełka 0
  * bez błędów: to te, które dziecko trafiło w próbnym teście, zanim trening do
  * nich doszedł (test nie awansuje pudełek) — nie są słabe, tylko jeszcze
- * nieprzerobione.
+ * nieprzerobione. Fakt z pudełka 0 z błędem w teście zostaje na liście (test
+ * go nie wprowadza, ale rodzic ma wiedzieć, że jeszcze go nie ma) — za słabymi
+ * z treningu, żeby ich nie wypierał.
  */
 export function weakestFacts(facts: Record<FactKey, FactState>, limit = 8): FactKey[] {
   return ALL_FACTS.filter((key) => {
@@ -305,7 +353,14 @@ export function weakestFacts(facts: Record<FactKey, FactState>, limit = 8): Fact
       const fb = facts[b];
       const accA = fa.right / fa.seen;
       const accB = fb.right / fb.seen;
-      return fa.box - fb.box || accA - accB || (fb.lastMs ?? 0) - (fa.lastMs ?? 0);
+      // Niewprowadzone (pudełko 0, błąd tylko z próbnego testu) na koniec:
+      // trening ich jeszcze nie ćwiczy, pierwsze miejsca mają słabe z treningu.
+      return (
+        Number(fa.box === 0) - Number(fb.box === 0) ||
+        fa.box - fb.box ||
+        accA - accB ||
+        (fb.lastMs ?? 0) - (fa.lastMs ?? 0)
+      );
     })
     .slice(0, limit);
 }

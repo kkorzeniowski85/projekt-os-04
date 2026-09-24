@@ -6,9 +6,13 @@
  * ZASADA DZIAŁANIA: wspólna "skrzynka" — jeden dokument JSON pod losowym,
  * niezgadywalnym adresem. Każde urządzenie po zmianie wysyła tam SCALONY stan
  * (pobierz → scal → wyślij), a przy każdym otwarciu i co kilka minut pobiera
- * i scala u siebie. Scalanie to unia sesji po `id` (lib/progress/merge.ts) —
- * jest idempotentne, więc kolejność i powtórzenia nie szkodzą, a stany
- * zbiegają się same.
+ * i scala u siebie. Scalanie to unia sesji i prób po `id`, a fakty tabliczki
+ * scala się po próbach (lib/progress/merge.ts) — jest przemienne i
+ * idempotentne, więc kolejność i powtórzenia nie szkodzą, a stany zbiegają się
+ * same. (Przy przyciętym dzienniku prób fakty tabliczki są przybliżeniem —
+ * liczniki nie odtworzą historii, która wypadła z dzienników wszystkich
+ * stron, a pudełko liczymy od nowa tylko od ostatniego błędu, który leży w
+ * obu dziennikach; patrz mergeFact.)
  *
  * ADRES SKRZYNKI WYMYŚLAMY SAMI — to najważniejsza decyzja w tym pliku i
  * wynik bolesnej lekcji z poprzedniej wersji, która kazała usłudze utworzyć
@@ -70,6 +74,20 @@ export type SyncStatus = {
   syncing: boolean;
   /** Kod przejęty automatycznie z Ligi Dźwięków na tym urządzeniu. */
   fromLiga: boolean;
+  /** Rodzic wyłączył synchronizację ręcznie — Akademia nie włączy się sama. */
+  optedOut: boolean;
+  /**
+   * Kiedy kod rodziny zmienił się na tym urządzeniu za Ligą albo po „Użyj
+   * kodu z Ligi" (null = nie zmienił się). Urządzenia podłączone wcześniej
+   * kodem z Akademii zostały na starym kodzie — panel o tym przypomina, dopóki
+   * rodzic nie potwierdzi.
+   */
+  codeChangedTs: number | null;
+  /**
+   * Ile sesji tego urządzenia zachowano przy dołączeniu do rodziny, która
+   * wcześniej wyczyściła postęp (patrz pendingJoin) — do informacji w panelu.
+   */
+  keptOnJoin: { sessions: number; resetTs: number } | null;
 };
 
 let status: SyncStatus = {
@@ -80,6 +98,9 @@ let status: SyncStatus = {
   lastErrorDetail: null,
   syncing: false,
   fromLiga: false,
+  optedOut: false,
+  codeChangedTs: null,
+  keptOnJoin: null,
 };
 
 const listeners = new Set<(s: SyncStatus) => void>();
@@ -115,29 +136,55 @@ function newCode(): string {
   return Array.from(bytes, (b) => ALFABET[b & 31]).join("");
 }
 
+type SavedSync = { code?: string | null; fromLiga?: boolean; optOut?: boolean; codeChangedTs?: number };
+
 export function loadSyncCode(): string | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const saved = JSON.parse(raw) as { code?: string; fromLiga?: boolean };
+    const saved = JSON.parse(raw) as SavedSync;
     const code = saved.code ?? null;
-    emit({ enabled: Boolean(code), code, fromLiga: Boolean(saved.fromLiga) });
+    emit({
+      enabled: Boolean(code),
+      code,
+      fromLiga: Boolean(saved.fromLiga),
+      optedOut: !code && Boolean(saved.optOut),
+      codeChangedTs: code && typeof saved.codeChangedTs === "number" ? saved.codeChangedTs : null,
+    });
     return code;
   } catch {
     return null;
   }
 }
 
-function saveSyncCode(code: string | null, fromLiga = false): void {
+function saveSyncCode(code: string | null, fromLiga = false, codeChangedTs: number | null = null): void {
   try {
-    if (code) localStorage.setItem(STORAGE_KEY, JSON.stringify({ code, fromLiga }));
+    if (code) {
+      const saved: SavedSync = { code, fromLiga };
+      if (codeChangedTs) saved.codeChangedTs = codeChangedTs;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+    }
     // Wyłączenie zapamiętujemy jawnie — inaczej przejęcie kodu z Ligi przy
     // następnym starcie włączałoby synchronizację wbrew decyzji rodzica.
     else localStorage.setItem(STORAGE_KEY, JSON.stringify({ code: null, optOut: true }));
   } catch {
     // brak localStorage — synchronizacja i tak nie ma sensu
   }
-  emit({ enabled: Boolean(code), code, fromLiga, lastError: null, lastErrorDetail: null });
+  emit({
+    enabled: Boolean(code),
+    code,
+    fromLiga,
+    optedOut: !code,
+    codeChangedTs: code ? codeChangedTs : null,
+    lastError: null,
+    lastErrorDetail: null,
+    keptOnJoin: code === status.code ? status.keptOnJoin : null,
+  });
+}
+
+/** Rodzic podłączył pozostałe urządzenia na nowo — przypomnienie znika. */
+export function dismissCodeChange(): void {
+  if (status.code) saveSyncCode(status.code, status.fromLiga);
 }
 
 function isOptedOut(): boolean {
@@ -169,6 +216,11 @@ export function ligaSyncCode(): string | null {
  * link, krótki kod), Akademia przechodzi razem z nią — inaczej urządzenia po
  * cichu rozjechałyby się na dwie skrzynki. Kodu ustawionego w Akademii ręcznie
  * i jawnego wyłączenia nie ruszamy.
+ *
+ * Wołane przed każdym obiegiem i po zmianie klucza Ligi w innej karcie
+ * (store.tsx), nie tylko przy starcie — otwarta karta też idzie za Ligą.
+ * Urządzenia podłączone kodem z Akademii (QR, krótki kod) nie widzą Ligi tego
+ * urządzenia i zostają na starym kodzie: stąd przypomnienie (codeChangedTs).
  */
 export function adoptFromLiga(): boolean {
   if (typeof window === "undefined") return false;
@@ -178,7 +230,8 @@ export function adoptFromLiga(): boolean {
   if (own === liga) return false;
   if (own && !status.fromLiga) return false;
   if (!own && isOptedOut()) return false;
-  saveSyncCode(liga, true);
+  saveSyncCode(liga, true, own ? Date.now() : null);
+  noteJoin(liga);
   return true;
 }
 
@@ -196,7 +249,9 @@ export function ligaCodeMismatch(): boolean {
 export function switchToLigaCode(): boolean {
   const liga = ligaSyncCode();
   if (!liga) return false;
-  saveSyncCode(liga, true);
+  const own = status.code;
+  saveSyncCode(liga, true, own && own !== liga ? Date.now() : null);
+  noteJoin(liga);
   return true;
 }
 
@@ -210,11 +265,13 @@ export function enableSync(): string {
   const liga = ligaSyncCode();
   const code = liga ?? newCode();
   saveSyncCode(code, Boolean(liga));
+  noteJoin(code);
   return code;
 }
 
 export function disableSync(): void {
   saveSyncCode(null);
+  noteJoin(null);
 }
 
 /**
@@ -226,6 +283,7 @@ export function adoptFromHash(): boolean {
   const match = window.location.hash.match(/[#&]sync=([a-zA-Z0-9-]{16,})/);
   if (!match) return false;
   saveSyncCode(match[1]);
+  noteJoin(match[1]);
   // Sprzątamy adres, żeby kod nie wisiał w pasku i historii.
   window.history.replaceState(null, "", window.location.pathname + window.location.search);
   return true;
@@ -235,6 +293,92 @@ export function pairingLink(): string | null {
   if (!status.code || typeof window === "undefined") return null;
   const base = window.location.pathname.replace(/rodzic\/?$/, "");
   return `${window.location.origin}${base}#sync=${status.code}`;
+}
+
+// --- do której rodziny należy reset ----------------------------------------
+
+/**
+ * Kod rodziny, w której zapadły znaczniki resetu i przywrócenia zapisane w
+ * postępie tego urządzenia (null = zapadły bez synchronizacji). Ten sam
+ * mechanizm co w Lidze Dźwięków (phonics.sync.markers.v1).
+ *
+ * Bez tego „Wyczyść postęp" na nowym tablecie (np. po próbnych sesjach, przy
+ * wyłączonej synchronizacji) po podłączeniu — także samoczynnym, za Ligą —
+ * stawał się resetem CAŁEJ rodziny: scalanie bierze najnowszy reset z obu
+ * stron, więc skasowałoby historię pozostałych urządzeń i skrzynki. Store
+ * przed obiegiem porównuje ten kod z bieżącym i przy różnicy zdejmuje
+ * znaczniki (runSync) — sesji sprzed lokalnego resetu i tak już tu nie ma,
+ * więc nic nie wraca.
+ *
+ * Osobny klucz, a nie pole postępu: postęp trafia do plików kopii, a kod
+ * rodziny to klucz do skrzynki i nie powinien leżeć na Dysku.
+ */
+const MARKERS_KEY = "school.sync.markers.v1";
+
+export function markersFamily(): string | null {
+  try {
+    const raw = localStorage.getItem(MARKERS_KEY);
+    return raw ? ((JSON.parse(raw) as { code?: string | null }).code ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setMarkersFamily(code: string | null): void {
+  try {
+    localStorage.setItem(MARKERS_KEY, JSON.stringify({ code }));
+  } catch {
+    // brak localStorage — synchronizacja i tak nie działa
+  }
+}
+
+// --- dołączenie do rodziny ---------------------------------------------------
+
+/**
+ * Kod rodziny, do której to urządzenie właśnie dołączyło (QR, krótki kod,
+ * włączenie synchronizacji, kod przejęty z Ligi), a jeszcze nie scaliło się z
+ * jej skrzynką.
+ *
+ * Odwrotność markersFamily: reset zrobiony w rodzinie, ZANIM urządzenie do
+ * niej dołączyło, nie dotyczy jego historii. Bez tego telefon z historią,
+ * podłączony do tabletu, na którym ktoś wcześniej wyczyścił próbne sesje, po
+ * cichu tracił wszystkie sesje sprzed tamtego resetu. Store przy pierwszym
+ * scaleniu zachowuje je przywróceniem (runSync), a panel mówi o tym rodzicowi.
+ *
+ * Zapisujemy to W CHWILI zmiany kodu, a nie wnioskujemy z braku
+ * markersFamily: urządzenie tuż po aktualizacji aplikacji też nie ma tego
+ * klucza, a reset jego własnej rodziny ma je objąć. Z tego samego powodu
+ * ponowne podłączenie do rodziny, w której urządzenie już było, to nie
+ * dołączenie.
+ */
+const JOIN_KEY = "school.sync.joining.v1";
+
+function noteJoin(code: string | null): void {
+  try {
+    if (code && markersFamily() !== code) localStorage.setItem(JOIN_KEY, JSON.stringify({ code }));
+    else localStorage.removeItem(JOIN_KEY);
+  } catch {
+    // brak localStorage — synchronizacja i tak nie działa
+  }
+}
+
+export function pendingJoin(): string | null {
+  try {
+    const raw = localStorage.getItem(JOIN_KEY);
+    return raw ? ((JSON.parse(raw) as { code?: string | null }).code ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Dołączenie do `code` załatwione — pierwsze scalenie ze skrzynką się odbyło. */
+export function finishJoin(code: string, kept: SyncStatus["keptOnJoin"]): void {
+  try {
+    if (pendingJoin() === code) localStorage.removeItem(JOIN_KEY);
+  } catch {
+    // brak localStorage — synchronizacja i tak nie działa
+  }
+  if (kept) emit({ keptOnJoin: kept });
 }
 
 // --- krótki kod do przepisania ---------------------------------------------
@@ -249,6 +393,21 @@ export function pairingLink(): string | null {
  */
 const KOD_ALFABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+/**
+ * Jak długo przekazka jest ważna. Pod 6 znakami leży pełny kod rodziny, a więc
+ * dostęp do skrzynki z imieniem i statystykami — nie może tam leżeć
+ * bezterminowo. Godzina wystarczy, żeby przepisać kod z ekranu na ekran.
+ *
+ * Godzinę pilnuje urządzenie, które kod pokazało (panel chowa go i czyści
+ * szufladę — expireShortCode). Urządzenie, które kod wpisuje, porównuje czas
+ * przekazki z WŁASNYM zegarem, a ten bywa przesunięty o całą strefę (komputer
+ * z dwoma systemami: zegar sprzętowy w czasie lokalnym) — więc odrzuca
+ * dopiero przekazki starsze o ponad dobę (KOD_ZEGARY_MS). Inaczej komputer ze
+ * zegarem +1 h nigdy by się nie podłączył, a każdy wpisany kod by przepadał.
+ */
+export const KOD_WAZNOSC_MS = 60 * 60 * 1000;
+const KOD_ZEGARY_MS = 24 * 60 * 60 * 1000;
+
 function szufladaKodu(short: string): string {
   return mailboxUrl(`para-${short}`);
 }
@@ -259,7 +418,10 @@ export function normalizeShortCode(wpisane: string): string {
 
 /** Zwraca 6-znakowy kod do przepisania albo null, gdy nie udało się go zapisać. */
 export async function createShortCode(): Promise<string | null> {
-  if (!status.code) return null;
+  // Kod rodziny z chwili kliknięcia — zmiana w tle (za Ligą) nie może podmienić
+  // przekazki w połowie; panel i tak pokazuje krótki kod tylko dla tego kodu.
+  const code = status.code;
+  if (!code) return null;
 
   for (let proba = 0; proba < 3; proba++) {
     const bytes = new Uint8Array(6);
@@ -275,7 +437,7 @@ export async function createShortCode(): Promise<string | null> {
 
     const zapis = await writeMailbox(
       szufladaKodu(short),
-      JSON.stringify({ code: status.code, ts: Date.now() }),
+      JSON.stringify({ code, ts: Date.now() }),
     );
     if (zapis.ok) return short;
   }
@@ -291,23 +453,51 @@ function szufladaKoduLigi(short: string): string {
   return `${ENDPOINT}/liga-dzwiekow-${encodeURIComponent(`para-${short}`)}`;
 }
 
-/** Podłączenie tego urządzenia kodem przepisanym z drugiego ekranu. */
-export async function adoptShortCode(wpisane: string): Promise<boolean> {
+export type ShortCodeResult = "ok" | "expired" | "not-found";
+
+/**
+ * Koniec ważności krótkiego kodu po stronie urządzenia, które go pokazało
+ * (minęła godzina albo rodzic wziął nowy kod): pusta szuflada = kodu nie ma.
+ * Nieudane czyszczenie nie szkodzi — urządzenie wpisujące i tak odrzuci
+ * przekazkę sprzed ponad doby.
+ */
+export async function expireShortCode(short: string): Promise<void> {
+  await writeMailbox(szufladaKodu(normalizeShortCode(short)), "");
+}
+
+/**
+ * Podłączenie tego urządzenia kodem przepisanym z drugiego ekranu. Przekazka
+ * jest jednorazowa: po udanym przejęciu czyścimy WŁASNĄ szufladę (szuflad
+ * Ligi nie ruszamy — to jej dane). Przekazek starszych niż godzina plus
+ * zapas na zegary (KOD_ZEGARY_MS) nie przyjmujemy.
+ */
+export async function adoptShortCode(wpisane: string, now = Date.now()): Promise<ShortCodeResult> {
   const short = normalizeShortCode(wpisane);
-  if (short.length !== 6) return false;
+  if (short.length !== 6) return "not-found";
 
+  let wlasna = true;
   let odczyt = await readMailbox(szufladaKodu(short));
-  if (odczyt.ok && !odczyt.dane.trim()) odczyt = await readMailbox(szufladaKoduLigi(short));
-  if (!odczyt.ok || !odczyt.dane.trim()) return false;
-
-  try {
-    const dane = JSON.parse(odczyt.dane) as { code?: string };
-    if (!dane?.code) return false;
-    saveSyncCode(dane.code);
-    return true;
-  } catch {
-    return false;
+  if (odczyt.ok && !odczyt.dane.trim()) {
+    wlasna = false;
+    odczyt = await readMailbox(szufladaKoduLigi(short));
   }
+  if (!odczyt.ok || !odczyt.dane.trim()) return "not-found";
+
+  let dane: { code?: unknown; ts?: unknown };
+  try {
+    dane = JSON.parse(odczyt.dane) as { code?: unknown; ts?: unknown };
+  } catch {
+    return "not-found";
+  }
+  if (typeof dane?.code !== "string" || !dane.code) return "not-found";
+  const wazna = typeof dane.ts === "number" && now - dane.ts <= KOD_WAZNOSC_MS + KOD_ZEGARY_MS;
+  if (wazna) {
+    saveSyncCode(dane.code);
+    noteJoin(dane.code);
+  }
+  // Nieudane czyszczenie nie psuje parowania — przekazka i tak wygaśnie.
+  if (wlasna) await writeMailbox(szufladaKodu(short), "");
+  return wazna ? "ok" : "expired";
 }
 
 // --- rozmowa ze skrzynką ---------------------------------------------------
@@ -407,14 +597,21 @@ async function pobierz(code: string): Promise<Wynik<ProgressState | null>> {
 
 /**
  * Ładunek do wysyłki. Gdy stan urośnie ponad limit usługi, przycinamy DZIENNIK
- * PRÓB — to dane diagnostyczne, a nie postęp. Sesje (z których odtwarza się
- * cały stan) zostają nietknięte, więc przycięcie niczego nie kosztuje: każde
- * urządzenie ma swoje próby u siebie, a scalanie i tak bierze ich unię.
+ * PRÓB (od najstarszych). Sesje, z których odtwarza się stan tematów, i stan
+ * faktów tabliczki zostają nietknięte, a każde urządzenie ma swoje próby u
+ * siebie. Przycięcie nie jest jednak całkiem darmowe: scalanie faktów
+ * rozpoznaje rozbieżności po próbach (merge.ts: mergeFact), więc przy krótkim
+ * dzienniku w skrzynce częściej wychodzi przybliżenie zamiast dokładnego
+ * odtworzenia. Nic się przy tym nie liczy podwójnie ani nie maleje.
  */
 function doWyslania(state: ProgressState): Wynik<string> {
   let tresc = JSON.stringify(state);
-  if (tresc.length > LIMIT_BAJTOW) {
-    tresc = JSON.stringify({ ...state, attempts: state.attempts.slice(-200) });
+  // Zostawiamy tyle najnowszych prób, ile się zmieści (a nie sztywne 200) —
+  // im dłuższy dziennik w skrzynce, tym częściej scalanie faktów jest dokładne.
+  let zostaw = state.attempts.length;
+  while (tresc.length > LIMIT_BAJTOW && zostaw > 0) {
+    zostaw = zostaw > 200 ? Math.floor(zostaw * 0.8) : 0;
+    tresc = JSON.stringify({ ...state, attempts: zostaw > 0 ? state.attempts.slice(-zostaw) : [] });
   }
   if (tresc.length > LIMIT_BAJTOW) {
     return {
@@ -456,19 +653,25 @@ function opisWyjatku(blad: unknown): string {
 /**
  * Czy mamy coś, czego skrzynka jeszcze nie widziała?
  *
- * Celowo patrzymy tylko na sesje i imię, a NIE na dziennik prób. Próby i tak
- * zawsze przyjeżdżają razem z sesją (zapisuje je ten sam commit), więc nic nam
- * nie umyka — a gdybyśmy je tu liczyli, przycięcie dziennika przy limicie
- * rozmiaru zapętliłoby wysyłkę: skrzynka miałaby na stałe mniej prób niż my,
- * więc każdy obieg uznawałby, że trzeba wysłać jeszcze raz.
+ * Celowo patrzymy tylko na sesje, imię i znaczniki resetu/przywrócenia, a NIE
+ * na dziennik prób. Próby i tak zawsze przyjeżdżają razem z sesją (zapisuje je
+ * ten sam commit), więc nic nam nie umyka — a gdybyśmy je tu liczyli,
+ * przycięcie dziennika przy limicie rozmiaru zapętliłoby wysyłkę: skrzynka
+ * miałaby na stałe mniej prób niż my, więc każdy obieg uznawałby, że trzeba
+ * wysłać jeszcze raz. Sesja dokończona po wcześniejszym zapisie (to samo `id`,
+ * późniejszy koniec) też jest nowością.
  */
 function mamyWiecej(merged: ProgressState, zdalny: ProgressState): boolean {
-  const znane = new Set(zdalny.sessions.map((s) => s.id));
+  const znane = new Map(zdalny.sessions.map((s) => [s.id, s]));
   return (
-    merged.sessions.some((s) => !znane.has(s.id)) ||
+    merged.sessions.some((s) => {
+      const tam = znane.get(s.id);
+      return !tam || tam.endedTs !== s.endedTs || tam.scored !== s.scored;
+    }) ||
     merged.childName !== zdalny.childName ||
     (merged.childNameTs ?? 0) !== (zdalny.childNameTs ?? 0) ||
-    (merged.resetTs ?? 0) > (zdalny.resetTs ?? 0)
+    (merged.resetTs ?? 0) > (zdalny.resetTs ?? 0) ||
+    (merged.restoreTs ?? 0) > (zdalny.restoreTs ?? 0)
   );
 }
 
@@ -477,6 +680,10 @@ function mamyWiecej(merged: ProgressState, zdalny: ProgressState): boolean {
  * `applyMerged` oddaje scalony stan do magazynu aplikacji — wołający decyduje,
  * czy faktycznie coś się zmieniło i czy zapisać.
  *
+ * `prepareLocal` (opcjonalne) dostaje pobraną skrzynkę PRZED scaleniem i
+ * zwraca stan lokalny do scalenia — store korzysta z tego przy dołączaniu do
+ * rodziny (patrz pendingJoin).
+ *
  * Bez blokad i wersjonowania: gdy dwa urządzenia zapiszą naraz, jedno nadpisze
  * drugie. Nic nie ginie, bo każde ma swój postęp u siebie i przy następnym
  * obiegu (po sesji albo co 3 minuty) zobaczy brak i dośle go ponownie.
@@ -484,6 +691,7 @@ function mamyWiecej(merged: ProgressState, zdalny: ProgressState): boolean {
 export async function syncNow(
   localState: ProgressState,
   applyMerged: (merged: ProgressState) => void,
+  prepareLocal?: (remote: ProgressState) => ProgressState,
 ): Promise<void> {
   const code = status.code ?? loadSyncCode();
   if (!code || status.syncing) return;
@@ -496,7 +704,8 @@ export async function syncNow(
       return;
     }
 
-    const merged = zdalne.dane ? mergeProgress(localState, zdalne.dane) : localState;
+    const local = zdalne.dane && prepareLocal ? prepareLocal(zdalne.dane) : localState;
+    const merged = zdalne.dane ? mergeProgress(local, zdalne.dane) : local;
     applyMerged(merged);
 
     if (zdalne.dane && !mamyWiecej(merged, zdalne.dane)) {

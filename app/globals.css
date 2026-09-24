@@ -25,8 +25,10 @@
   --font-reading: var(--font-andika), "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", sans-serif;
 }
 
-html,
-body {
+/* Tylko html: body rośnie z treścią (min-h-dvh w layout.tsx). Sztywne
+   height: 100% na body zostawiało dolny inset safe-area na wysokości ekranu,
+   a nie za ostatnim elementem długiej strony — nie wydłużał przewijania. */
+html {
   height: 100%;
 }
 
@@ -56,7 +58,8 @@ html {
 }
 
 /* iPhone z aplikacją na ekranie głównym: treść pod paskiem statusu i
-   wycięciem (viewportFit: cover). Na urządzeniach bez wycięcia insety = 0. */
+   wycięciem (viewportFit: cover). Na urządzeniach bez wycięcia insety = 0.
+   Dolny inset leży za ostatnim elementem, bo body nie ma stałej wysokości. */
 body {
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
     env(safe-area-inset-left);

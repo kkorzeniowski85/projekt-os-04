@@ -66,12 +66,13 @@ export function factExercise(
 /** Codzienny trening: 20 pytań (12 na telefonie) dobranych przez pudełka. */
 export function buildTrainingSession(
   facts: Record<string, FactState>,
-  options: { size: number; table?: number | null; now?: number },
+  options: { size: number; table?: number | null; now?: number; holdNew?: boolean },
 ): Exercise[] {
   const questions = buildPracticeSet(facts, {
     size: options.size,
     now: options.now ?? Date.now(),
     table: options.table ?? null,
+    holdNew: options.holdNew,
   });
   // „Nowy fakt" tylko przy pierwszym pojawieniu w sesji — przy powtórce w
   // drugiej turze to już znajomy fakt.

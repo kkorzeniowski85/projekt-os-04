@@ -38,32 +38,63 @@ export function textClipPath(text: string): string {
   return `${CLIP_BASE}/phrases/${audioSlug(text)}.mp3`;
 }
 
+/** "unknown" = nie wiadomo (brak sieci, limit czasu, błąd serwera). */
 type ClipState = "yes" | "no" | "unknown";
 
-const clipAvailability = new Map<string, Promise<ClipState>>();
+/** Dłużej nie czekamy na odpowiedź — potem gra zapas (synteza). */
+const HEAD_TIMEOUT_MS = 3000;
+/** Tyle pamiętamy „nie wiadomo", żeby każde stuknięcie nie czekało od nowa. */
+const UNKNOWN_TTL_MS = 30_000;
+/**
+ * Tyle pamiętamy „nie ma". Nie do przeładowania strony: tuż po wdrożeniu
+ * service worker może jeszcze odpowiadać wg poprzedniego manifestu, a nowe
+ * nagranie grałaby wtedy synteza przez całą sesję aplikacji.
+ */
+const NO_TTL_MS = 10 * 60_000;
+
+type ClipEntry = { state: Promise<ClipState>; expires: number };
+
+const clipAvailability = new Map<string, ClipEntry>();
 
 /**
- * Czy nagranie istnieje. Zapamiętujemy tylko pewne odpowiedzi (jest / 404).
- * Błąd sieci to „nie wiadomo" — nie zapamiętujemy go, bo chwilowy brak zasięgu
- * oznaczałby nagranie jako brakujące aż do przeładowania strony, a offline
- * plik i tak może być w pamięci service workera.
+ * Jedno zapytanie HEAD z limitem czasu. Service worker odpowiada na nie z
+ * manifestu wdrożenia (deploy.json), bez sieci; bez niego pyta serwer.
+ */
+async function probeClip(path: string): Promise<ClipState> {
+  const controller = typeof AbortController === "undefined" ? null : new AbortController();
+  const timer = setTimeout(() => controller?.abort(), HEAD_TIMEOUT_MS);
+  try {
+    const response = await fetch(path, { method: "HEAD", signal: controller?.signal });
+    if (response.ok) return "yes";
+    return response.status === 404 || response.status === 410 ? "no" : "unknown";
+  } catch {
+    return "unknown";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Czy nagranie istnieje. „Jest" pamiętamy do przeładowania strony, „nie ma"
+ * (404) przez NO_TTL_MS. Błąd sieci albo limit czasu to „nie wiadomo": nie
+ * utrwalamy go (chwilowy brak zasięgu oznaczałby nagranie jako brakujące, a
+ * offline plik i tak może być w pamięci service workera), ale pamiętamy przez
+ * UNKNOWN_TTL_MS — bez service workera (pierwsze otwarcie) przy łączu, które
+ * wisi, każde stuknięcie czekałoby inaczej od nowa na limit czasu. Z service
+ * workerem HEAD odpowiada od razu z manifestu, a na samo nagranie spoza
+ * pamięci SW czeka najwyżej kilka sekund (CLIP_WAIT_MS w public/sw.js).
  */
 function clipState(path: string): Promise<ClipState> {
   if (typeof window === "undefined") return Promise.resolve("no");
-  let pending = clipAvailability.get(path);
-  if (!pending) {
-    pending = fetch(path, { method: "HEAD" })
-      .then((response): ClipState =>
-        response.ok ? "yes" : response.status === 404 || response.status === 410 ? "no" : "unknown",
-      )
-      .catch((): ClipState => "unknown")
-      .then((state) => {
-        if (state === "unknown") clipAvailability.delete(path);
-        return state;
-      });
-    clipAvailability.set(path, pending);
-  }
-  return pending;
+  const known = clipAvailability.get(path);
+  if (known && known.expires > Date.now()) return known.state;
+  const entry: ClipEntry = { state: probeClip(path), expires: Infinity };
+  void entry.state.then((state) => {
+    if (state === "unknown") entry.expires = Date.now() + UNKNOWN_TTL_MS;
+    if (state === "no") entry.expires = Date.now() + NO_TTL_MS;
+  });
+  clipAvailability.set(path, entry);
+  return entry.state;
 }
 
 export async function clipExists(path: string): Promise<boolean> {
@@ -88,12 +119,22 @@ type PlayStatus = "ok" | "blocked" | "failed" | "interrupted";
 let playToken = 0;
 
 /**
+ * Kończy czekanie bieżącego odtworzenia z `wait`. Przerwanie (interrupt niżej,
+ * nowsze nagranie) woła je od razu, nie czekając na zdarzenie „pause": Chrome gubi
+ * je, gdy tuż po pause() zmienia się `src`, i przerwana sekwencja kończyła się
+ * dopiero z „ended" następnego nagrania — podświetlenie w liczeniu skokami
+ * wisiało wtedy jeszcze ok. sekundy.
+ */
+let settlePending: (() => void) | null = null;
+
+/**
  * Gra plik; z `wait` czeka do końca nagrania (albo do przerwania przez inne
  * odtworzenie). Czekanie jest potrzebne sekwencjom: liczeniu skokami i
  * czytaniu tekstu zdanie po zdaniu.
  */
 async function playUrl(url: string, wait: boolean): Promise<PlayStatus> {
   const token = ++playToken;
+  settlePending?.();
   const audio = getSharedAudio();
   // Nagranie przerywa też awaryjny głos z poprzedniego odtworzenia.
   if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
@@ -108,8 +149,10 @@ async function playUrl(url: string, wait: boolean): Promise<PlayStatus> {
           audio.removeEventListener("error", done);
           audio.removeEventListener("pause", onPause);
           clearTimeout(safety);
+          if (settlePending === done) settlePending = null;
           resolve();
         };
+        settlePending = done;
         // Pauza wywołana przez NOWSZE odtworzenie = przerwanie. Naturalny
         // koniec nagrania też wysyła „pause", ale wtedy token jest aktualny.
         const onPause = () => {
@@ -239,11 +282,27 @@ async function playClipOrSpeak(
 type PlayOptions = { wait?: boolean };
 
 /**
+ * Ucisza od razu to, co gra (nagranie i syntezę), i kończy czekanie na nie.
+ * Od razu, a nie dopiero przy starcie nowego nagrania: nowe najpierw pyta o
+ * plik (HEAD), a zapasem bywa synteza, która elementu audio w ogóle nie
+ * rusza — przerwane liczenie grało i świeciło wtedy dalej do końca liczby.
+ */
+function interrupt(): void {
+  playToken += 1;
+  settlePending?.();
+  if (sharedAudio) sharedAudio.pause();
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+/**
  * Publiczne odtwarzanie przerywa trwającą sekwencję: dziecko, które stuknie
  * głośnik w trakcie czytania tekstu, chce usłyszeć TO, co stuknęło.
  */
 function manual<T>(run: () => Promise<T>): Promise<T> {
   sequenceToken += 1;
+  interrupt();
   return run();
 }
 
@@ -304,6 +363,7 @@ export type SequenceStep =
  */
 export async function playSequence(steps: SequenceStep[], gapMs = 220): Promise<boolean> {
   const token = ++sequenceToken;
+  interrupt();
   for (const step of steps) {
     if (token !== sequenceToken) return false;
     step.onStart?.();
@@ -324,11 +384,7 @@ export async function playSequence(steps: SequenceStep[], gapMs = 220): Promise<
 /** Zatrzymuje wszystko, co gra (np. przy wyjściu z ekranu). */
 export function stopAudio(): void {
   sequenceToken += 1;
-  playToken += 1;
-  if (sharedAudio) sharedAudio.pause();
-  if (typeof window !== "undefined" && "speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-  }
+  interrupt();
 }
 
 let unlockAttempted = false;
@@ -520,8 +576,31 @@ export async function playClipFile(path: string): Promise<boolean> {
   return (await playUrl(path, false)) === "ok";
 }
 
-/** Które pliki są na miejscu. */
-export async function auditClips(paths: string[]): Promise<Record<string, boolean>> {
-  const results = await Promise.all(paths.map(async (path) => [path, await clipExists(path)] as const));
-  return Object.fromEntries(results);
+/** Wynik sprawdzenia nagrań; `unknown` = nie da się sprawdzić (brak internetu). */
+export type ClipAudit = { found: string[]; missing: string[]; unknown: string[] };
+
+/** Tyle zapytań naraz — ponad tysiąc równoległych zatkałoby słabe łącze. */
+const AUDIT_BATCH = 24;
+
+/**
+ * Które pliki są na miejscu. Osobne zapytania (bez pamięci clipState), żeby
+ * wynik był aktualny, i partiami. Brak odpowiedzi to nie „brakuje": liczymy
+ * go osobno, a gdy nie odpowiada cała partia (brak internetu), resztę od razu
+ * oznaczamy jako niesprawdzoną, zamiast czekać na limit czasu przy każdej.
+ */
+export async function auditClips(paths: string[]): Promise<ClipAudit> {
+  const result: ClipAudit = { found: [], missing: [], unknown: [] };
+  for (let start = 0; start < paths.length; start += AUDIT_BATCH) {
+    const batch = paths.slice(start, start + AUDIT_BATCH);
+    const states = await Promise.all(batch.map(probeClip));
+    batch.forEach((path, index) => {
+      const state = states[index];
+      (state === "yes" ? result.found : state === "no" ? result.missing : result.unknown).push(path);
+    });
+    if (states.every((state) => state === "unknown")) {
+      result.unknown.push(...paths.slice(start + AUDIT_BATCH));
+      break;
+    }
+  }
+  return result;
 }

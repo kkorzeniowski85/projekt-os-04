@@ -236,7 +236,7 @@ function operationsSession(): Exercise[] {
     heading: "Słowa działań",
     promptEn: "add, take away, lots of, share",
     bodyPl:
-      "Na lekcji w Anglii rzadko pada sam znak „+”. Nauczyciel mówi słowami — a każde działanie ma kilka nazw:",
+      "Po angielsku rzadko mówi się sam znak „+” — działanie nazywa się słowami, a każde ma kilka nazw:",
     examples: [
       { en: "add, plus, the total of, the sum of", pl: "dodawanie (+)" },
       { en: "take away, subtract, minus, the difference between", pl: "odejmowanie (−)" },
@@ -623,7 +623,7 @@ export const NOTATION: NotationItem[] = [
     promptEn: "What does this sign mean?",
     options: ["divided by", "times", "take away"],
     answer: "divided by",
-    explainPl: "Znak dzielenia w Anglii to ÷ („divided by”). Naszego dwukropka 12 : 3 w angielskiej szkole się nie używa — dwukropek oznacza tam godzinę (3:30).",
+    explainPl: "Po angielsku dzielenie zapisuje się znakiem ÷ („divided by”). Dwukropek (12 : 3) oznacza w angielskim zapisie godzinę (3:30), nie dzielenie.",
   },
   {
     id: "times",
@@ -631,7 +631,7 @@ export const NOTATION: NotationItem[] = [
     promptEn: "What does this sign mean?",
     options: ["times", "plus", "divided by"],
     answer: "times",
-    explainPl: "× czyta się „times” albo „multiplied by”. Kropki (4 · 5) jako znaku mnożenia w Year 4 się nie używa.",
+    explainPl: "× czyta się „times” albo „multiplied by”. W angielskim zapisie mnoży się tylko znakiem × — kropki (4 · 5) się nie używa.",
   },
   {
     id: "pounds",

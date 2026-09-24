@@ -152,7 +152,7 @@ export const WORKSHEET_MEANINGS: MeaningItem[] = [
     en: "Show your working.",
     answerPl: "Zapisz, jak liczyłeś.",
     wrongPl: ["Pokaż zeszyt nauczycielowi.", "Pracuj szybciej."],
-    explainPl: "„Show your working” = zapisz obliczenia, nie tylko wynik. W Anglii za sposób też są punkty.",
+    explainPl: "„Show your working” = zapisz obliczenia, nie tylko wynik. Za sposób liczenia też są punkty.",
   },
   {
     en: "Explain your answer.",
@@ -164,7 +164,7 @@ export const WORKSHEET_MEANINGS: MeaningItem[] = [
     en: "Check your answer.",
     answerPl: "Sprawdź, czy wynik jest dobry.",
     wrongPl: ["Zaznacz odpowiedź ptaszkiem.", "Zapytaj kolegę o odpowiedź."],
-    explainPl: "„Check” = sprawdź — np. policz jeszcze raz albo odwrotnym działaniem. Ptaszek to w Anglii „tick”.",
+    explainPl: "„Check” = sprawdź — np. policz jeszcze raz albo odwrotnym działaniem. Ptaszek to po angielsku „tick”.",
   },
   {
     en: "Estimate the answer.",
@@ -359,7 +359,7 @@ export const CLASSROOM_UNITS: ClassroomUnit[] = [
     goalPl: "Tick, Circle, Underline, Cross out, Show your working.",
     parentIntroPl:
       "Dziecko często umie zadanie, ale robi nie to, co każe polecenie (zakreśla zamiast podkreślić, podaje sam wynik zamiast „show your working”). Te słowa są na każdej kartce i w każdym teście.",
-    startNotePl: "Z rodzicem: po ekranie „Poznaj” pobawcie się poleceniami na zwykłej kartce.",
+    startNotePl: "Z rodzicem: po pierwszym ekranie z przykładami pobawcie się poleceniami na zwykłej kartce.",
     build: () => worksheetSession(),
   },
 ];

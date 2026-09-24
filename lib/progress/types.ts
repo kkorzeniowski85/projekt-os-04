@@ -111,6 +111,12 @@ export type ProgressState = {
    * przy najbliższej synchronizacji.
    */
   resetTs: number;
+  /**
+   * Kiedy rodzic przywrócił kopię sprzed wyczyszczenia (0 = nigdy). Późniejsze
+   * przywrócenie znosi granicę resetu — patrz progressCutoff. Samo wyzerowanie
+   * resetTs nic by nie dało: scalanie bierze większy znacznik z obu stron.
+   */
+  restoreTs: number;
   updatedTs: number;
   units: Record<string, UnitState>;
   facts: Record<string, FactState>;
@@ -128,6 +134,16 @@ export function unitKeyOf(module: ModuleId, unitId: string): string {
 }
 
 /**
+ * Granica odcięcia: rekordy starsze od niej odpadają przy scalaniu. To
+ * `resetTs`, chyba że później przywrócono kopię (`restoreTs`) — wtedy 0, czyli
+ * nic nie odpada. Wszędzie tej funkcji, a nie gołego `resetTs`.
+ */
+export function progressCutoff(state: Pick<ProgressState, "resetTs" | "restoreTs">): number {
+  const reset = state.resetTs ?? 0;
+  return reset > (state.restoreTs ?? 0) ? reset : 0;
+}
+
+/**
  * Domyślna nazwa jest neutralna, bo repozytorium jest publiczne. Imię (albo
  * pseudonim) wpisuje się w trybie rodzica; nie trafia do repozytorium, ale
  * przy włączonej synchronizacji jedzie w skrzynce textdb.dev (sync.ts).
@@ -138,6 +154,7 @@ export function emptyProgress(childName = "Bohater"): ProgressState {
     childName,
     childNameTs: 0,
     resetTs: 0,
+    restoreTs: 0,
     updatedTs: 0,
     units: {},
     facts: {},
@@ -179,6 +196,7 @@ export function normalizeProgress(state: ProgressState): ProgressState {
     // Imię wpisane przed wprowadzeniem znacznika wygrywa z domyślnym „Bohater".
     childNameTs: typeof state.childNameTs === "number" ? state.childNameTs : named ? 1 : 0,
     resetTs: typeof state.resetTs === "number" ? state.resetTs : 0,
+    restoreTs: typeof state.restoreTs === "number" ? state.restoreTs : 0,
     units: state.units && typeof state.units === "object" ? state.units : {},
     facts: state.facts && typeof state.facts === "object" ? state.facts : {},
     mocks: Array.isArray(state.mocks) ? state.mocks : [],

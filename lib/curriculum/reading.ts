@@ -219,7 +219,7 @@ export const READING_TEXTS: ReadingText[] = [
         en: "Find and copy one word that tells you where some children read books.",
         answers: ["carpet"],
         skill: "retrieve",
-        explainPl: "„Some children read books on the carpet.” W angielskiej klasie „the carpet” to ważne miejsce — tam siada się na wspólne części lekcji.",
+        explainPl: "„Some children read books on the carpet.” „The carpet” to w klasie ważne miejsce — tam siada się na wspólne części lekcji.",
       },
       {
         id: "rainbow",
@@ -497,7 +497,7 @@ export const READING_TEXTS: ReadingText[] = [
         en: "Find and copy the word that tells you it is the last step.",
         answers: ["finally"],
         skill: "vocabulary",
-        explainPl: "„Finally” = na koniec. Instrukcje w Anglii prowadzą takie słowa: First, Next, Then, After that, Finally.",
+        explainPl: "„Finally” = na koniec. Instrukcje po angielsku prowadzą takie słowa: First, Next, Then, After that, Finally.",
       },
       {
         id: "order",

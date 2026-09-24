@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/deploy-manifest.mjs",
     "build": "next build",
     "start": "next start",
     "audio": "tsx scripts/generate-audio.mjs",

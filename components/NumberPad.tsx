@@ -11,6 +11,32 @@
 
 import { useEffect, useRef } from "react";
 
+/**
+ * Skąd przyszedł bieżący fokus: z myszy/palca czy z klawiatury (Tab albo
+ * program po klawiszu). Enter na przycisku lub linku z fokusem z klawiatury
+ * („← Przerwij", „↩") należy do tego elementu — dziecko go widzi obrysowany.
+ * Po stuknięciu 🔊 przycisk też ma fokus, ale wtedy Enter dalej zatwierdza
+ * liczbę. :focus-visible tego nie rozróżni: Chrome włącza go po każdym
+ * klawiszu także na przycisku klikniętym myszą (sprawdzone), więc liczymy sami.
+ * Nasłuch jeden na dokument, od załadowania modułu — fokus bywa ustawiony,
+ * zanim klawiatura liczb się pojawi.
+ */
+let pointerActive = false;
+let pointerFocused: EventTarget | null = null;
+if (typeof window !== "undefined") {
+  const opts = { capture: true, passive: true } as const;
+  window.addEventListener("pointerdown", () => (pointerActive = true), opts);
+  window.addEventListener("mousedown", () => (pointerActive = true), opts);
+  window.addEventListener("keydown", () => (pointerActive = false), opts);
+  window.addEventListener("focusin", (event) => (pointerFocused = pointerActive ? event.target : null), opts);
+}
+
+/** Enter ma aktywować przycisk/link, na który fokus przyszedł z klawiatury. */
+function keyboardFocusedControl(target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || target === pointerFocused) return false;
+  return target.closest("button, a[href], [role='button']") !== null;
+}
+
 export function NumberPad({
   value,
   onChange,
@@ -55,6 +81,8 @@ export function NumberPad({
         event.preventDefault();
         erase();
       } else if (event.key === "Enter") {
+        // Bez preventDefault: przeglądarka sama „kliknie" element z fokusem.
+        if (keyboardFocusedControl(event.target)) return;
         event.preventDefault();
         enter();
       }

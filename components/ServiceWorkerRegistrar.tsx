@@ -8,6 +8,7 @@
  */
 
 import { useEffect } from "react";
+import { isBusy } from "@/lib/sessionBusy";
 
 export function ServiceWorkerRegistrar() {
   useEffect(() => {
@@ -19,13 +20,18 @@ export function ServiceWorkerRegistrar() {
     // przeładowujemy raz — ale:
     //  - nie przy PIERWSZEJ instalacji (kontroler null → SW): strona ma już
     //    aktualny kod, a przeładowanie zgubiłoby rozpoczętą sesję;
-    //  - nie w trakcie ćwiczenia: dopiero gdy aplikacja zejdzie z ekranu
-    //    (sesja zapisuje się wtedy sama — pagehide w useSessionFlow).
+    //  - tylko gdy aplikacja zejdzie z ekranu — i to nie w trakcie ćwiczenia
+    //    ani próbnego testu (lib/sessionBusy.ts). Przeładowanie w tle nie
+    //    zgubiłoby odpowiedzi (sesja zapisuje się przy pagehide), ale dziecko
+    //    wróciłoby na ekran startowy zamiast do swojego zadania, a wstrzymany
+    //    test zniknąłby w całości. Czeka więc na pierwsze zejście z ekranu
+    //    po skończonym ćwiczeniu.
     const hadController = Boolean(navigator.serviceWorker.controller);
     let pending = false;
     let reloaded = false;
     const reloadWhenHidden = () => {
       if (!pending || reloaded || document.visibilityState !== "hidden") return;
+      if (isBusy()) return;
       reloaded = true;
       window.location.reload();
     };

@@ -157,23 +157,54 @@ export function mockRecordOf(
 }
 
 /**
- * Cała zmiana stanu po zamkniętej sesji — jedno miejsce, z którego korzysta
+ * Cała zmiana stanu po zapisie sesji — jedno miejsce, z którego korzysta
  * magazyn (store.tsx). Zwraca nowy stan; nie mutuje poprzedniego.
+ *
+ * Zapis to UPSERT po `id` sesji: ta sama sesja bywa zapisywana więcej niż raz
+ * (pagehide, a po powrocie strony z bfcache dokończenie; szkic odzyskany po
+ * ubiciu karty). Rekord sesji jest wtedy podmieniany, do dziennika i do faktów
+ * trafiają TYLKO próby o nowych id — fakt nie dostaje tej samej odpowiedzi
+ * dwa razy — a statusy jednostek liczymy od nowa ze wszystkich sesji
+ * chronologicznie, jak przy scalaniu (merge.ts).
  */
 export function commitToState(
   previous: ProgressState,
   session: SessionRecord,
   attempts: Attempt[],
 ): ProgressState {
-  const facts = applyFactAttempts(previous.facts, attempts, session.kind);
-  const mocks = session.kind === "mock" ? [...previous.mocks, mockRecordOf(session, attempts)] : previous.mocks;
+  const known = new Set(previous.attempts.map((attempt) => attempt.id));
+  const fresh = attempts.filter((attempt) => !known.has(attempt.id));
+  const at = previous.sessions.findIndex((existing) => existing.id === session.id);
+  const sessions =
+    at === -1
+      ? [...previous.sessions, session]
+      : previous.sessions.map((existing, index) => (index === at ? session : existing));
+
+  let units = previous.units;
+  if (at === -1) {
+    units = applySessionToUnits(previous.units, session);
+  } else {
+    units = {};
+    for (const each of [...sessions].sort((x, y) => x.endedTs - y.endedTs)) {
+      units = applySessionToUnits(units, each);
+    }
+  }
+
+  let mocks = previous.mocks;
+  if (session.kind === "mock") {
+    const mock = mockRecordOf(session, attempts);
+    mocks = previous.mocks.some((existing) => existing.id === mock.id)
+      ? previous.mocks.map((existing) => (existing.id === mock.id ? mock : existing))
+      : [...previous.mocks, mock];
+  }
+
   return {
     ...previous,
     updatedTs: session.endedTs,
-    units: applySessionToUnits(previous.units, session),
-    facts,
+    units,
+    facts: applyFactAttempts(previous.facts, fresh, session.kind),
     mocks,
-    sessions: [...previous.sessions, session],
-    attempts: [...previous.attempts, ...attempts].slice(-RULES.attemptLogLimit),
+    sessions,
+    attempts: [...previous.attempts, ...fresh].slice(-RULES.attemptLogLimit),
   };
 }

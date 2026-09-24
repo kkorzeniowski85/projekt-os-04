@@ -19,7 +19,8 @@ import { BigButton, Card, ParentTip, Speaker } from "@/components/ui";
 import { playFact, stopVictoryFanfare, unlockAudio } from "@/lib/audio";
 import { buildMtcForm, factKey, MTC, type Question } from "@/lib/curriculum/tables";
 import { useProgress, type PendingAttempt, type SessionOutcome } from "@/lib/progress/store";
-import type { SessionMode } from "@/lib/progress/types";
+import type { FactState, SessionMode } from "@/lib/progress/types";
+import { useBusy } from "@/lib/sessionBusy";
 import { useDeviceRole } from "@/lib/useDeviceRole";
 
 type Stage = "intro" | "practice" | "ready" | "check" | "result";
@@ -46,6 +47,9 @@ export default function MockCheckPage() {
   const [outcome, setOutcome] = useState<SessionOutcome | null>(null);
   const [answers, setAnswers] = useState<{ q: Question; answer: string; correct: boolean }[]>([]);
   const startedRef = useRef(0);
+  // Test w toku (od rozgrzewki do wyniku): aktualizacja aplikacji nie może
+  // przeładować strony w połowie pomiaru.
+  useBusy(stage === "practice" || stage === "ready" || stage === "check");
 
   const start = (chosen: SessionMode) => {
     unlockAudio();
@@ -124,7 +128,15 @@ export default function MockCheckPage() {
     );
   }
 
-  return <Result outcome={outcome} answers={answers} mocks={state.mocks} onAgain={() => setStage("intro")} />;
+  return (
+    <Result
+      outcome={outcome}
+      answers={answers}
+      mocks={state.mocks}
+      facts={state.facts}
+      onAgain={() => setStage("intro")}
+    />
+  );
 }
 
 function Intro({
@@ -160,7 +172,8 @@ function Intro({
         <p className="mb-2">
           W prawdziwym teście nie wolno pomagać, więc tutaj też nie — to pomiar, nie lekcja. Test zmienia
           plan nauki tylko w jedną stronę: fakty z błędem wracają do częstszych powtórek, a trafienia
-          niczego nie „zaliczają” (awans jest za regularny trening).
+          niczego nie „zaliczają” (awans jest za regularny trening). Faktów, których trening jeszcze nie
+          zaczął, test nie wprowadza — dojdą razem ze swoją tabliczką, po lekcji „Liczymy co…”.
         </p>
         <p>Wystarczy raz na 2–3 tygodnie. Częściej — dziecko uczy się testu zamiast tabliczki.</p>
       </ParentTip>
@@ -355,11 +368,13 @@ function Result({
   outcome,
   answers,
   mocks,
+  facts,
   onAgain,
 }: {
   outcome: SessionOutcome | null;
   answers: { q: Question; answer: string; correct: boolean }[];
   mocks: { score: number; ts: number }[];
+  facts: Record<string, FactState>;
   onAgain: () => void;
 }) {
   const score = outcome?.mock?.score ?? answers.filter((answer) => answer.correct).length;
@@ -375,11 +390,16 @@ function Result({
     });
   }, [missed]);
 
+  // Test nie wprowadza faktów z pudełka 0 (practice.ts), więc błędy dzielą się
+  // na te, które wracają do treningu, i te, do których trening jeszcze dojdzie.
+  const started = unique.filter(({ q }) => (facts[factKey(q[0], q[1])]?.box ?? 0) >= 1);
+  const notYet = unique.filter(({ q }) => (facts[factKey(q[0], q[1])]?.box ?? 0) === 0);
+
   const message =
     score === 25
-      ? "Komplet! Tak wygląda gotowość na czerwiec."
+      ? "Komplet! 25 na 25!"
       : score >= 21
-        ? "Świetny wynik — na poziomie średniej krajowej albo wyżej."
+        ? "Świetny wynik!"
         : score >= 15
           ? "Dobra baza. Trening zajmie się faktami, które uciekły."
           : "To pomiar na starcie — każdy trening będzie przesuwał ten wynik w górę.";
@@ -399,21 +419,13 @@ function Result({
       )}
       <p className="max-w-md text-lg text-hero-gold">{message}</p>
 
-      {unique.length > 0 && (
-        <Card className="w-full">
-          <h2 className="mb-3 text-lg font-black">Te fakty wracają do treningu</h2>
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {unique.map(({ q, answer }) => (
-              <li key={`${q[0]}x${q[1]}`} className="flex items-center justify-between gap-2 rounded-2xl bg-white/5 px-3 py-2">
-                <span className="font-reading text-xl font-black tabular-nums">
-                  {q[0]} × {q[1]} = {q[0] * q[1]}
-                </span>
-                <span className="text-xs text-paper/50">{answer === "" ? "brak odpowiedzi" : `wpisane: ${answer}`}</span>
-                <Speaker size="sm" onPlay={() => void playFact(q[0], q[1])} ariaLabel={`Posłuchaj: ${q[0]} razy ${q[1]}`} />
-              </li>
-            ))}
-          </ul>
-        </Card>
+      {started.length > 0 && <MissedFacts title="Te fakty wracają do treningu" items={started} />}
+      {notYet.length > 0 && (
+        <MissedFacts
+          title="Te dojdą razem ze swoją tabliczką"
+          note="Trening jeszcze do nich nie doszedł — przyjdą po kolei, każdy w swoim czasie."
+          items={notYet}
+        />
       )}
 
       <div className="flex w-full max-w-md flex-col gap-3 sm:flex-row">
@@ -438,5 +450,33 @@ function Result({
         </p>
       </ParentTip>
     </div>
+  );
+}
+
+function MissedFacts({
+  title,
+  note,
+  items,
+}: {
+  title: string;
+  note?: string;
+  items: { q: Question; answer: string }[];
+}) {
+  return (
+    <Card className="w-full">
+      <h2 className={`${note ? "mb-1" : "mb-3"} text-lg font-black`}>{title}</h2>
+      {note && <p className="mb-3 text-sm text-paper/60">{note}</p>}
+      <ul className="grid gap-2 sm:grid-cols-2">
+        {items.map(({ q, answer }) => (
+          <li key={`${q[0]}x${q[1]}`} className="flex items-center justify-between gap-2 rounded-2xl bg-white/5 px-3 py-2">
+            <span className="font-reading text-xl font-black tabular-nums">
+              {q[0]} × {q[1]} = {q[0] * q[1]}
+            </span>
+            <span className="text-xs text-paper/50">{answer === "" ? "brak odpowiedzi" : `wpisane: ${answer}`}</span>
+            <Speaker size="sm" onPlay={() => void playFact(q[0], q[1])} ariaLabel={`Posłuchaj: ${q[0]} razy ${q[1]}`} />
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

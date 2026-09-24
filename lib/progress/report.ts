@@ -12,8 +12,8 @@ import { READING_TEXTS, SKILL_LABEL, type ReadingSkill } from "@/lib/curriculum/
 import { CLASSROOM_UNITS } from "@/lib/curriculum/classroom";
 import { MTC_WINDOW_START, daysUntil } from "@/lib/mtcDates";
 import { pl } from "@/lib/pl";
-import { focusTable, tablesSummary, weakestFacts } from "@/lib/tables/practice";
-import { accuracyOf } from "./rules";
+import { FACT_RULES, focusTable, tablesSummary, weakestFacts } from "@/lib/tables/practice";
+import { accuracyOf, RULES } from "./rules";
 import { unitKeyOf, type ModuleId, type ProgressState } from "./types";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -103,7 +103,9 @@ export function buildMarkdownReport(state: ProgressState, now = Date.now()): str
   lines.push(
     `Płynnie (pudełko 4+: szybkie trafienia w powtórkach w terminie, co najmniej 3 dni nauki): ${summary.fluent}/66 · w drodze: ${summary.learning} · do powtórki: ${summary.weak} · niećwiczone: ${summary.unseen}.`,
   );
-  lines.push(`Tabliczka w centrum uwagi: ${focus ? `×${focus}` : "wszystkie w drodze"}.`);
+  lines.push(
+    `Tabliczka w centrum uwagi: ${focus ? `×${focus}` : "żadna — wszystkie 66 faktów już wprowadzone, trening pracuje na powtórkach"}.`,
+  );
   lines.push(
     `Płynne wg tabliczki: ${Object.entries(summary.perTable)
       .map(([table, value]) => `×${table} ${value.fluent}/${value.total}`)
@@ -124,7 +126,7 @@ export function buildMarkdownReport(state: ProgressState, now = Date.now()): str
   const factAttempts = state.attempts.filter((attempt) => attempt.exercise === "fact" && attempt.ts >= since);
   const correctMs = factAttempts.filter((attempt) => attempt.correct).map((attempt) => attempt.responseMs);
   lines.push(
-    `Trening w okresie: ${factAttempts.length} odpowiedzi, trafność ${percent(
+    `Trening w okresie: ${pl(factAttempts.length, "odpowiedź", "odpowiedzi", "odpowiedzi")}, trafność ${percent(
       factAttempts.length ? factAttempts.filter((attempt) => attempt.correct).length / factAttempts.length : null,
     )}, mediana czasu poprawnej: ${median(correctMs) !== null ? (median(correctMs)! / 1000).toFixed(1) + " s" : "—"}.`,
   );
@@ -200,6 +202,23 @@ export function buildMarkdownReport(state: ProgressState, now = Date.now()): str
       `Polecenia „w ruchu” (ocena rodzica): ${actAttempts.filter((attempt) => attempt.correct).length}/${actAttempts.length} wykonane.`,
     );
   }
+
+  lines.push("");
+  lines.push("## Kontekst dla analizy");
+  lines.push(
+    `Progi tematów (matematyka, czytanki, język klasy, lekcje „Liczymy co N”): opanowany = co najmniej ${Math.round(RULES.masteryAccuracy * 100)}% ` +
+      `w ${RULES.masterySessions} sesjach pod rząd; trudny = poniżej ${Math.round(RULES.strugglingAccuracy * 100)}% w ${RULES.strugglingSessions} sesjach pod rząd; ` +
+      `status zmienia tylko sesja z co najmniej ${RULES.minScoredForStatus} ocenianymi zadaniami.`,
+  );
+  lines.push(
+    `Tabliczka: pudełka 0–${FACT_RULES.maxBox}, odstępy powtórek ${FACT_RULES.intervalsDays.join("/")} dni; szybka odpowiedź = do ${String(FACT_RULES.fastMs / 1000).replace(".", ",")} s; ` +
+      `płynnie = pudełko ${FACT_RULES.fluentBox}+. Awans tylko za szybkie trafienie w terminie. ` +
+      "Nowy fakt odpowiedziany szybko od razu trafia do pudełka 2; pomyłka cofa do pudełka 1, a stamtąd awans do 2 możliwy już w tej samej sesji. " +
+      "Od pudełka 2 kolejny awans najwcześniej następnego dnia, potem po 3 dniach itd. Nowe fakty tabliczka po tabliczce. Próbny test tylko obniża pudełka i nie wprowadza faktów, których trening jeszcze nie zaczął.",
+  );
+  lines.push(
+    "Polecenia „w ruchu” (ocenia je rodzic) i wskazówki rodzica są tylko w trybie wspólnym — wyników samodzielnych i z rodzicem nie da się porównać 1:1.",
+  );
 
   lines.push("");
   lines.push("## Pytania do analizy");

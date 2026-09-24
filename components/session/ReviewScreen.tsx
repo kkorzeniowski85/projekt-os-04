@@ -89,10 +89,21 @@ function Answer({ exercise }: { exercise: Exercise }) {
       );
     }
     case "typed":
+      // Fakt tabliczki nie ma dźwięku pytania — jego nagraniem jest odpowiedź
+      // („seven times eight is fifty-six"), więc głośnik stoi przy niej.
       return (
-        <p className="rounded-blob bg-hero-lime px-6 py-3 text-3xl font-black text-night">
-          {exercise.revealText ?? exercise.answer}
-        </p>
+        <div className="flex items-center gap-3">
+          {exercise.revealSound && (
+            <Speaker
+              size="sm"
+              onPlay={() => void playSound(exercise.revealSound!)}
+              ariaLabel="Posłuchaj odpowiedzi"
+            />
+          )}
+          <p className="rounded-blob bg-hero-lime px-6 py-3 text-3xl font-black text-night">
+            {exercise.revealText ?? exercise.answer}
+          </p>
+        </div>
       );
     case "order":
       return (
@@ -100,16 +111,24 @@ function Answer({ exercise }: { exercise: Exercise }) {
           {exercise.items.map((item, index) => (
             <li key={item.id} className="flex items-center gap-3 rounded-2xl bg-hero-lime/15 px-3 py-2">
               <span className="font-black">{index + 1}.</span>
+              {item.sound && (
+                <Speaker size="sm" onPlay={() => void playSound(item.sound!)} ariaLabel={`Posłuchaj: ${item.label}`} />
+              )}
               <span className="font-reading text-lg">{item.label}</span>
             </li>
           ))}
         </ol>
       );
     case "tapword":
+      // Tekst jest w samym ćwiczeniu (nie w `visual`), więc bez tego powtórka
+      // „Find and copy" nie miała czego pokazać ani przeczytać.
       return (
-        <p className="rounded-2xl bg-white/10 px-4 py-2 text-lg">
-          ✏️ Copy: <span className="font-reading font-black text-hero-lime">{exercise.answers[0]}</span>
-        </p>
+        <>
+          <p className="rounded-2xl bg-white/10 px-4 py-2 text-lg">
+            ✏️ Copy: <span className="font-reading font-black text-hero-lime">{exercise.answers[0]}</span>
+          </p>
+          <VisualView visual={{ kind: "passage", title: exercise.title, sentences: exercise.sentences }} />
+        </>
       );
     case "act":
       return (

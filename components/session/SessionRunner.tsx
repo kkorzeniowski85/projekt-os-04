@@ -54,20 +54,19 @@ export function SessionRunner(props: SessionRunnerProps) {
 
   const flow = useSessionFlow<Exercise>({
     build: props.build,
-    commit: (attempts, mode, startedTs, flush) =>
+    commit: (snapshot, flush) =>
       commitSession(
         {
+          ...snapshot,
           module: props.module,
           unitId: props.unitId,
           kind: props.kind,
-          mode,
           device: role,
-          startedTs,
           endedTs: Date.now(),
-          attempts,
         },
         { flush },
       ),
+    draft: { module: props.module, unitId: props.unitId, kind: props.kind, device: role },
     bonusFor:
       props.bonus === false
         ? undefined
@@ -104,6 +103,8 @@ export function SessionRunner(props: SessionRunnerProps) {
           wszystkich={flow.screens.length}
           ocenianych={flow.scoredCount()}
           zapisane={flow.isSaved()}
+          bonus={flow.inBonus}
+          zapisanaCzesc={flow.savedPart()}
           onZapisz={flow.saveNow}
           onPorzuc={flow.discard}
           onWroc={flow.closeInterrupt}
@@ -111,8 +112,11 @@ export function SessionRunner(props: SessionRunnerProps) {
         />
       )}
 
-      <div className="flex flex-col gap-4">
-        <header className="flex items-center justify-between gap-3">
+      {/* Pod oknem przerwania treść sesji nie istnieje dla fokusu i klawiatury:
+          Tab z okna nie dochodzi do „Dalej" ani „↩", Enter niczego nie przesuwa.
+          data-own-enter: Enter na przyciskach paska działa jak klik, nie „Dalej". */}
+      <div className="flex flex-col gap-4" inert={flow.interrupting}>
+        <header className="flex items-center justify-between gap-3" data-own-enter>
           <button type="button" onClick={flow.openInterrupt} className="text-sm text-paper/60 underline">
             ← Przerwij
           </button>
@@ -160,12 +164,13 @@ export function SessionRunner(props: SessionRunnerProps) {
             onNext={flow.onNext}
             paused={flow.interrupting}
             firstAttempt={flow.attemptAt(flow.index)}
+            answerMs={flow.answerMs}
           />
         )}
       </div>
 
       {role === "desktop" && (
-        <aside className="flex flex-col gap-4">
+        <aside className="flex flex-col gap-4" inert={flow.interrupting}>
           <Card>
             <div className="flex items-center gap-3">
               <HeroAvatar hero={hero} size={64} />

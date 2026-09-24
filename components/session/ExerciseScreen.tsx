@@ -12,7 +12,9 @@
  *    trafieniu, jeśli jest co przeczytać (uwaga rodzica z testów Ligi);
  *  - bez wyjaśnienia po trafieniu tempo zostaje — przejście samo;
  *  - okno „Przerwać ćwiczenie?" wstrzymuje ekran pod spodem: klawiatura nie
- *    odpowiada, nic nie przechodzi dalej, czas odpowiedzi stoi.
+ *    odpowiada, nic nie przechodzi dalej, czas odpowiedzi stoi. Czas stoi
+ *    też, gdy strona jest w tle, a ↩ i powrót go nie zerują — zegar żyje w
+ *    przebiegu sesji (useSessionFlow), ekran tylko go odczytuje.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -45,6 +47,8 @@ type Common = {
   paused: boolean;
   /** Pierwsza próba z tego ekranu, gdy dziecko wraca na niego po ↩. */
   firstAttempt?: PendingAttempt;
+  /** Czas odpowiedzi w tej chwili (useSessionFlow: bez pauz i czasu w tle). */
+  answerMs: () => number;
 };
 
 type Props<K extends Exercise["kind"]> = Common & { exercise: Extract<Exercise, { kind: K }> };
@@ -56,6 +60,7 @@ export function ExerciseScreen({
   onNext,
   paused = false,
   firstAttempt,
+  answerMs,
 }: {
   exercise: Exercise;
   mode: SessionMode;
@@ -63,16 +68,20 @@ export function ExerciseScreen({
   onNext: () => void;
   paused?: boolean;
   firstAttempt?: PendingAttempt;
+  answerMs: () => number;
 }) {
   // „Dalej" najwyżej raz na ekran: klik, Enter i automatyczne przejście mogą
   // się zbiec w czasie, a każde dodatkowe wywołanie przeskakiwało ekran.
+  // Pod oknem przerwania wcale (i bez zużywania tego jednego razu).
   const firedRef = useRef(false);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const next = useCallback(() => {
-    if (firedRef.current) return;
+    if (firedRef.current || pausedRef.current) return;
     firedRef.current = true;
     onNext();
   }, [onNext]);
-  const common: Common = { mode, onAnswer, onNext: next, paused, firstAttempt };
+  const common: Common = { mode, onAnswer, onNext: next, paused, firstAttempt, answerMs };
 
   switch (exercise.kind) {
     case "learn":
@@ -112,21 +121,25 @@ function useAutoSound(exercise: Exercise, enabled = true): [boolean, () => void]
 }
 
 /**
- * Początek odliczania czasu odpowiedzi. Czas z otwartym oknem przerwania się
- * nie liczy — inaczej zawyżałby responseMs i odbierał fakt płynności.
+ * setTimeout kasowany przy odmontowaniu ekranu — dźwięk odłożony po błędzie
+ * nie może zagrać już na powtórce (↩) albo na innej stronie.
  */
-function useAnswerClock(paused: boolean) {
-  const startRef = useRef(Date.now());
-  const pausedAtRef = useRef<number | null>(null);
+function useLater() {
+  const timersRef = useRef(new Set<ReturnType<typeof setTimeout>>());
   useEffect(() => {
-    if (paused) {
-      pausedAtRef.current = Date.now();
-    } else if (pausedAtRef.current !== null) {
-      startRef.current += Date.now() - pausedAtRef.current;
-      pausedAtRef.current = null;
-    }
-  }, [paused]);
-  return startRef;
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
+  return useCallback((run: () => void, ms: number) => {
+    const timer = setTimeout(() => {
+      timersRef.current.delete(timer);
+      run();
+    }, ms);
+    timersRef.current.add(timer);
+  }, []);
 }
 
 function PromptBlock({
@@ -198,7 +211,9 @@ export function PassageBelow({ exercise }: { exercise: Exercise }) {
  * „Dalej" — działa też Enterem, bo przy tabliczce ręka jest na klawiaturze.
  * Nasłuch rusza po 250 ms (Enter, który zatwierdził odpowiedź, już się
  * odbył) i ignoruje autopowtarzanie przytrzymanego klawisza — inaczej
- * przytrzymany Enter przeskakiwał wyjaśnienie po błędzie.
+ * przytrzymany Enter przeskakiwał wyjaśnienie po błędzie. Enter na przycisku
+ * paska sesji (`data-own-enter`: „← Przerwij", „↩") należy do tego przycisku —
+ * inaczej Enter na „← Przerwij" zamiast otworzyć okno przesuwał ekran.
  */
 function NextButton({
   onNext,
@@ -219,6 +234,7 @@ function NextButton({
     }, 250);
     function onKey(event: KeyboardEvent) {
       if (!armed || event.key !== "Enter" || event.repeat) return;
+      if ((event.target as Element | null)?.closest?.("[data-own-enter]")) return;
       event.preventDefault();
       onNextRef.current();
     }
@@ -346,8 +362,13 @@ function LearnExercise({ exercise, mode, onNext, paused }: Props<"learn">) {
 export function CountAlong({ numbers }: { numbers: number[] }) {
   const [current, setCurrent] = useState<number | null>(null);
   const [hidden, setHidden] = useState(false);
+  // Numer uruchomienia: podświetlenie gaśnie po końcu liczenia ALBO po jego
+  // przerwaniu (głośnik przy poleceniu, „Posłuchaj" na powtórce). Nie gasi go
+  // tylko przerwanie przez nowe liczenie z tego samego przycisku.
+  const runRef = useRef(0);
 
   const play = () => {
+    const run = ++runRef.current;
     void playSequence(
       numbers.map((value, index) => ({
         kind: "number" as const,
@@ -355,8 +376,8 @@ export function CountAlong({ numbers }: { numbers: number[] }) {
         onStart: () => setCurrent(index),
       })),
       120,
-    ).then((finished) => {
-      if (finished) setCurrent(null);
+    ).then(() => {
+      if (run === runRef.current) setCurrent(null);
     });
   };
 
@@ -400,11 +421,11 @@ const COLUMNS: Record<number, string> = {
   4: "grid-cols-2 sm:grid-cols-4",
 };
 
-function ChoiceExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt }: Props<"choice">) {
+function ChoiceExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt, answerMs }: Props<"choice">) {
   const [needsTap, clearTap] = useAutoSound(exercise, !firstAttempt);
   const [picked, setPicked] = useState<string | null>(firstAttempt?.answer ?? null);
   const [repaired, setRepaired] = useState(false);
-  const startRef = useAnswerClock(paused);
+  const later = useLater();
 
   const correct = picked !== null && picked === exercise.answer;
   const inRepair = picked !== null && !correct && !repaired;
@@ -429,12 +450,12 @@ function ChoiceExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt
       item: exercise.item,
       answer: option.id,
       correct: isRight,
-      responseMs: Date.now() - startRef.current,
+      responseMs: answerMs(),
     });
     // Ze słuchu: po błędzie jeszcze raz to samo nagranie — teraz z pytaniem
     // „które to było?" w głowie dziecko słyszy różnicę.
     if (!isRight && exercise.sound && exercise.listenOnly) {
-      setTimeout(() => void playSound(exercise.sound!), 450);
+      later(() => void playSound(exercise.sound!), 450);
     }
   }
 
@@ -552,7 +573,7 @@ function ChoiceButton({
 
 type TypedPhase = "answer" | "correct" | "repair" | "repaired";
 
-function TypedExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt }: Props<"typed">) {
+function TypedExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt, answerMs }: Props<"typed">) {
   const [needsTap, clearTap] = useAutoSound(exercise, !firstAttempt);
   const [value, setValue] = useState("");
   const [phase, setPhase] = useState<TypedPhase>(
@@ -561,7 +582,7 @@ function TypedExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt 
   const [given, setGiven] = useState(firstAttempt?.answer ?? "");
   const [fast, setFast] = useState(false);
   const [shake, setShake] = useState(false);
-  const startRef = useAnswerClock(paused);
+  const later = useLater();
 
   const resolved = phase === "correct" || phase === "repaired";
   const wasWrong = phase === "repair" || phase === "repaired";
@@ -577,7 +598,7 @@ function TypedExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt 
   function submit(value: string) {
     if (value === "" || paused) return;
     if (phase === "answer") {
-      const ms = Date.now() - startRef.current;
+      const ms = answerMs();
       const isRight = Number(value) === exercise.answer;
       onAnswer({
         ts: Date.now(),
@@ -599,7 +620,7 @@ function TypedExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt 
         setGiven(value);
         setValue("");
         setPhase("repair");
-        if (exercise.revealSound) setTimeout(() => void playSound(exercise.revealSound!), 400);
+        if (exercise.revealSound) later(() => void playSound(exercise.revealSound!), 400);
       }
       return;
     }
@@ -682,7 +703,7 @@ function TypedExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt 
 
 // --- Ułóż po kolei -----------------------------------------------------------------
 
-function OrderExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt }: Props<"order">) {
+function OrderExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt, answerMs }: Props<"order">) {
   const [needsTap, clearTap] = useAutoSound(exercise, !firstAttempt);
   const shuffled = useMemo(() => {
     const ids = exercise.items.map((item) => item.id).join();
@@ -698,7 +719,6 @@ function OrderExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt 
   const [mistake, setMistake] = useState(firstAttempt?.correct === false);
   const [flash, setFlash] = useState<string | null>(null);
   const reportedRef = useRef(Boolean(firstAttempt));
-  const startRef = useAnswerClock(paused);
 
   const done = placed.length === exercise.items.length;
   const expected = exercise.items[placed.length];
@@ -713,7 +733,7 @@ function OrderExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt 
       item: exercise.item,
       answer: correct ? "ok" : "error",
       correct,
-      responseMs: Date.now() - startRef.current,
+      responseMs: answerMs(),
     });
   }
 
@@ -801,7 +821,7 @@ function OrderExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt 
 
 // --- Find and copy ---------------------------------------------------------------
 
-function TapWordExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt }: Props<"tapword">) {
+function TapWordExercise({ exercise, mode, onAnswer, onNext, paused, firstAttempt, answerMs }: Props<"tapword">) {
   const [needsTap, clearTap] = useAutoSound(exercise, !firstAttempt);
   // Pierwsze stuknięcie: klucz tokenu („zdanie:słowo" — to samo słowo może stać
   // w tekście dwa razy, a podświetlić trzeba to jedno) i czy było trafne.
@@ -811,7 +831,6 @@ function TapWordExercise({ exercise, mode, onAnswer, onNext, paused, firstAttemp
   const [found, setFound] = useState<string | null>(
     firstAttempt?.correct === true ? (firstAttempt.answer ?? exercise.answers[0]) : null,
   );
-  const startRef = useAnswerClock(paused);
 
   const answers = useMemo(() => new Set(exercise.answers.map(normalizeWord)), [exercise.answers]);
   const firstRight = first?.right ?? false;
@@ -830,7 +849,7 @@ function TapWordExercise({ exercise, mode, onAnswer, onNext, paused, firstAttemp
         item: exercise.item,
         answer: normalizeWord(token),
         correct: isRight,
-        responseMs: Date.now() - startRef.current,
+        responseMs: answerMs(),
       });
       playFeedbackTone(isRight ? "good" : "try-again");
       if (isRight) setFound(token);
@@ -904,12 +923,11 @@ function TapWordExercise({ exercise, mode, onAnswer, onNext, paused, firstAttemp
  * Rodzic mówi polecenie (albo puszcza nagranie), dziecko wykonuje. Ocenia
  * rodzic — aplikacja świadomie nie słucha dziecka (zasada briefu).
  */
-function ActExercise({ exercise, onAnswer, onNext, paused, firstAttempt }: Props<"act">) {
+function ActExercise({ exercise, onAnswer, onNext, paused, firstAttempt, answerMs }: Props<"act">) {
   const [needsTap, clearTap] = useAutoSound(exercise, !firstAttempt);
   const [result, setResult] = useState<boolean | null>(
     firstAttempt ? firstAttempt.correct === true : null,
   );
-  const startRef = useAnswerClock(paused);
 
   function judge(correct: boolean) {
     if (paused || result !== null) return;
@@ -920,7 +938,7 @@ function ActExercise({ exercise, onAnswer, onNext, paused, firstAttempt }: Props
       exercise: exercise.exercise,
       item: exercise.item,
       correct,
-      responseMs: Date.now() - startRef.current,
+      responseMs: answerMs(),
     });
   }
 
@@ -966,8 +984,13 @@ function PassageExercise({ exercise, onNext, paused }: Props<"passage">) {
   const [current, setCurrent] = useState<number | null>(null);
   const [showPl, setShowPl] = useState(false);
   const [heard, setHeard] = useState(false);
+  // Numer odtworzenia (stuknięte zdanie albo całość). playText kończy się tak
+  // samo po końcu nagrania i po przerwaniu, więc ramkę stukniętego zdania gasi
+  // tylko odtworzenie, którego nic później nie zastąpiło.
+  const playRef = useRef(0);
 
   const playAll = () => {
+    playRef.current += 1;
     void playSequence(
       exercise.sentences.map((sentence, index) => ({
         kind: "text" as const,
@@ -1017,10 +1040,11 @@ function PassageExercise({ exercise, onNext, paused }: Props<"passage">) {
             key={index}
             type="button"
             onClick={() => {
+              const play = ++playRef.current;
               setCurrent(index);
-              void playText(sentence.en, { wait: true }).then(() =>
-                setCurrent((now) => (now === index ? null : now)),
-              );
+              void playText(sentence.en, { wait: true }).then(() => {
+                if (play === playRef.current) setCurrent(null);
+              });
             }}
             className={`rounded-2xl px-3 py-2 text-left transition ${
               current === index ? "bg-hero-gold/25 ring-2 ring-hero-gold" : "bg-white/5 hover:bg-white/10"

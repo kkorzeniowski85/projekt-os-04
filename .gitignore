@@ -40,4 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-
+# generowany przed buildem (scripts/deploy-manifest.mjs)
+/public/deploy.json

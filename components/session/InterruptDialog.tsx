@@ -19,6 +19,8 @@ export function InterruptDialog({
   wszystkich,
   ocenianych,
   zapisane,
+  bonus = false,
+  zapisanaCzesc = false,
   onZapisz,
   onPorzuc,
   onWroc,
@@ -27,8 +29,12 @@ export function InterruptDialog({
   zrobione: number;
   wszystkich: number;
   ocenianych: number;
-  /** Sesja już zapisana (runda bonusowa) — wyjście niczego nie traci. */
+  /** Sesja zapisana i od zapisu nic nie przybyło — wyjście niczego nie traci. */
   zapisane: boolean;
+  /** Trwa runda bonusowa (bez punktów). */
+  bonus?: boolean;
+  /** Część odpowiedzi już zapisana (strona była zamknięta i wróciła). */
+  zapisanaCzesc?: boolean;
   onZapisz: () => void;
   onPorzuc: () => void;
   onWroc: () => void;
@@ -54,8 +60,9 @@ export function InterruptDialog({
         <h2 className="mb-2 text-2xl font-black">Przerwać ćwiczenie?</h2>
         {zapisane ? (
           <p className="mb-5 text-paper/80">
-            Sesja jest już zapisana razem z wynikiem — runda bonusowa niczego nie punktuje, więc
-            wyjście teraz nic nie traci.
+            {bonus
+              ? "Sesja jest już zapisana razem z wynikiem — runda bonusowa niczego nie punktuje, więc wyjście teraz nic nie traci."
+              : "Wszystkie odpowiedzi są już zapisane — wyjście teraz nic nie traci."}
           </p>
         ) : nicNieZrobione ? (
           <p className="mb-5 text-paper/80">Nie ma jeszcze żadnej odpowiedzi — nie ma czego zapisywać.</p>
@@ -96,8 +103,9 @@ export function InterruptDialog({
 
         {!zapisane && !nicNieZrobione && (
           <p className="mt-4 text-xs text-paper/50">
-            „Wyjdź bez zapisu” nie zostawia śladu — to samo ćwiczenie można zacząć od nowa, od
-            pierwszego zadania.
+            {zapisanaCzesc
+              ? "Część odpowiedzi jest już zapisana (aplikacja była na chwilę zamknięta) — „Wyjdź bez zapisu” pominie tylko te nowsze."
+              : "„Wyjdź bez zapisu” nie zostawia śladu — to samo ćwiczenie można zacząć od nowa, od pierwszego zadania."}
           </p>
         )}
       </Card>

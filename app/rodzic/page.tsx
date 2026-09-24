@@ -11,7 +11,15 @@ import { FactGrid } from "@/components/FactGrid";
 import { ParentGate } from "@/components/ParentGate";
 import { QrCode } from "@/components/QrCode";
 import { BigButton, Card, STATUS_LABEL, STATUS_STYLE } from "@/components/ui";
-import { auditClips, numberClipPath, factClipPath, textClipPath, getVoiceStatus, type VoiceStatus } from "@/lib/audio";
+import {
+  auditClips,
+  numberClipPath,
+  factClipPath,
+  textClipPath,
+  getVoiceStatus,
+  type ClipAudit,
+  type VoiceStatus,
+} from "@/lib/audio";
 import { CLASSROOM_UNITS, classroomPhrases } from "@/lib/curriculum/classroom";
 import { MATHS_TOPICS, mathsPhrases } from "@/lib/curriculum/maths";
 import { numbersWithAudio } from "@/lib/curriculum/numbers";
@@ -19,7 +27,13 @@ import { READING_TEXTS, readingPhrases } from "@/lib/curriculum/reading";
 import { parseFact, TABLES } from "@/lib/curriculum/tables";
 import { MTC_WINDOW_START, roughlyUntil, SCHOOL_START, daysUntil } from "@/lib/mtcDates";
 import { pl } from "@/lib/pl";
-import { buildProgressExport, looksLikeLigaFile, parseProgressFile, progressFileName } from "@/lib/progress/merge";
+import {
+  buildProgressExport,
+  looksLikeLigaFile,
+  parseProgressFile,
+  previewImport,
+  progressFileName,
+} from "@/lib/progress/merge";
 import {
   buildAttemptsCsv,
   buildMarkdownReport,
@@ -32,7 +46,11 @@ import {
   adoptShortCode,
   createShortCode,
   disableSync,
+  dismissCodeChange,
   enableSync,
+  expireShortCode,
+  getSyncStatus,
+  KOD_WAZNOSC_MS,
   ligaCodeMismatch,
   normalizeShortCode,
   pairingLink,
@@ -40,7 +58,7 @@ import {
   switchToLigaCode,
   type SyncStatus,
 } from "@/lib/progress/sync";
-import { unitKeyOf, type ModuleId } from "@/lib/progress/types";
+import { progressCutoff, unitKeyOf, type ModuleId } from "@/lib/progress/types";
 import { countingPhrases } from "@/lib/tables/sessions";
 import { focusTable, tablesSummary, weakestFacts } from "@/lib/tables/practice";
 
@@ -80,7 +98,7 @@ function ParentPanel() {
         </div>
         <p className="mt-3 text-sm text-paper/75">
           Dni z treningiem w ostatnich 4 tygodniach: <strong>{trainingDays}/28</strong>. Cel: 5–6 dni w
-          tygodniu po ok. 5 minut. {focus ? `Teraz w centrum uwagi: ×${focus}.` : "Wszystkie tabliczki są już w drodze."}
+          tygodniu po ok. 5 minut. {focus ? `Teraz w centrum uwagi: ×${focus}.` : "Wszystkie fakty są już w nauce — trening pilnuje powtórek."}
         </p>
         <p className="mt-2 text-xs text-paper/55">
           Jak czytać wynik: „płynnie” = dobrze i w 3,5 s przy kolejnych powtórkach w odstępach dni
@@ -289,13 +307,42 @@ function SyncCard() {
   const { importProgress, requestSync, state } = useProgress();
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [shortCode, setShortCode] = useState<string | null>(null);
+  // Krótki kod razem z kodem rodziny, dla którego powstał, i chwilą utworzenia:
+  // przekazka działa godzinę i tylko raz, a kod rodziny potrafi zmienić się w
+  // tle (za Ligą) — stary krótki kod prowadziłby wtedy do starej skrzynki.
+  const [shortCode, setShortCode] = useState<{ short: string; forCode: string; ts: number } | null>(null);
   const [making, setMaking] = useState(false);
   const [typed, setTyped] = useState("");
   const [joining, setJoining] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => subscribeSync(setSync), []);
+
+  // Po godzinie kod znika z ekranu i ze skrzynki. Godzinę liczy to urządzenie,
+  // bo zegar urządzenia, które kod wpisuje, bywa przesunięty (sync.ts).
+  useEffect(() => {
+    if (!shortCode) return;
+    const timer = setTimeout(() => {
+      setShortCode(null);
+      void expireShortCode(shortCode.short);
+    }, Math.max(0, shortCode.ts + KOD_WAZNOSC_MS - Date.now()));
+    return () => clearTimeout(timer);
+  }, [shortCode]);
+  const shownShort = shortCode && shortCode.forCode === sync?.code ? shortCode.short : null;
+
+  /** Chowa pokazany krótki kod i czyści jego szufladę (nowy kod, wyłączenie). */
+  function dropShortCode() {
+    if (shortCode) void expireShortCode(shortCode.short);
+    setShortCode(null);
+  }
+
+  // Kod rodziny zmienił się w tle (za Ligą, w innej karcie): krótki kod do
+  // starej skrzynki podłączyłby komputer do obiegu, którego już nikt nie używa.
+  useEffect(() => {
+    if (!shortCode || !sync || shortCode.forCode === sync.code) return;
+    setShortCode(null);
+    void expireShortCode(shortCode.short);
+  }, [shortCode, sync]);
 
   async function onImportFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -327,12 +374,66 @@ function SyncCard() {
       );
       return;
     }
-    const added = importProgress(parsed);
-    setMessage(
-      added > 0
-        ? `Scalono: ${pl(added, "nowa sesja", "nowe sesje", "nowych sesji")}.`
-        : "Nic nowego — wszystkie sesje z pliku już tu były (albo pochodzą sprzed wyczyszczenia postępu).",
-    );
+    // Najpierw sprawdzamy, co zrobi scalenie — granica „Wyczyść postęp" potrafi
+    // po cichu pominąć sesje z pliku albo usunąć sesje z tego urządzenia.
+    const preview = previewImport(state, parsed);
+    const resetDate = new Date(preview.mergedCutoff).toLocaleDateString("pl-PL");
+    let restore = false;
+    // Nowszy reset z pliku rozchodzi się synchronizacją jak „Wyczyść postęp" —
+    // więc przy włączonej synchronizacji pytamy nawet, gdy tu nic nie zniknie.
+    const newerReset = preview.mergedCutoff > progressCutoff(state);
+    if (preview.removed > 0 || (newerReset && sync?.enabled)) {
+      const here =
+        preview.removed > 0
+          ? ` Wczytanie usunie z tego urządzenia ${pl(preview.removed, "sesję", "sesje", "sesji")} sprzed tej daty.`
+          : "";
+      const everywhere = sync?.enabled
+        ? " Synchronizacja jest włączona, więc sesje sprzed tej daty znikną też na pozostałych urządzeniach podłączonych kodem rodziny."
+        : "";
+      const ok = window.confirm(`Ta kopia zawiera wyczyszczenie postępu z ${resetDate}.${here}${everywhere} Kontynuować?`);
+      if (!ok) {
+        setMessage("Kopia nie została wczytana — postęp na tym urządzeniu bez zmian.");
+        return;
+      }
+    } else if (preview.olderSessions > 0) {
+      restore = window.confirm(
+        `Ta kopia ma ${pl(preview.olderSessions, "sesję", "sesje", "sesji")} sprzed wyczyszczenia postępu (${resetDate}). Przywrócić je?\n\nOK — przywróć (przy włączonej synchronizacji także na pozostałych urządzeniach).\nAnuluj — wczytaj tylko nowsze.`,
+      );
+    }
+
+    const { added, removed } = importProgress(parsed, { restore });
+    const skipped = restore ? 0 : preview.olderSessions;
+    const parts: string[] = [];
+    if (added > 0) {
+      parts.push(
+        restore
+          ? `Przywrócono: ${pl(added, "sesja", "sesje", "sesji")} (także sprzed wyczyszczenia postępu).`
+          : `Scalono: ${pl(added, "nowa sesja", "nowe sesje", "nowych sesji")}.`,
+      );
+    }
+    if (removed > 0) {
+      parts.push(
+        `Usunięto z tego urządzenia ${pl(removed, "sesję", "sesje", "sesji")} sprzed wyczyszczenia postępu (${resetDate}).`,
+      );
+    }
+    if (added === 0 && removed === 0) {
+      parts.push(skipped > 0 ? "Nic nowego nie doszło." : "Nic nowego — wszystkie sesje z pliku już tu były.");
+    }
+    if (skipped > 0) {
+      parts.push(`Pominięto ${pl(skipped, "sesję", "sesje", "sesji")} sprzed wyczyszczenia postępu (${resetDate}).`);
+    }
+    setMessage(parts.join(" "));
+  }
+
+  async function makeShortCode() {
+    const forCode = getSyncStatus().code;
+    if (!forCode) return;
+    dropShortCode();
+    setMaking(true);
+    const short = await createShortCode();
+    setMaking(false);
+    setShortCode(short ? { short, forCode, ts: Date.now() } : null);
+    if (!short) setMessage("Nie udało się przygotować kodu — sprawdź połączenie i spróbuj ponownie.");
   }
 
   const mismatch = sync?.enabled ? ligaCodeMismatch() : false;
@@ -353,18 +454,58 @@ function SyncCard() {
               osobnego parowania i idzie za Ligą, gdy tam zmienisz obieg.
             </p>
           )}
+          {sync.keptOnJoin && (
+            <p className="mb-3 rounded-2xl bg-black/25 p-3 text-sm text-paper/85">
+              To urządzenie miało {pl(sync.keptOnJoin.sessions, "sesję", "sesje", "sesji")} sprzed wyczyszczenia
+              postępu w tej rodzinie ({new Date(sync.keptOnJoin.resetTs).toLocaleDateString("pl-PL")}).{" "}
+              {sync.keptOnJoin.sessions === 1 ? "Została zachowana i trafi" : "Zostały zachowane i trafią"} też na
+              pozostałe urządzenia. Jeśli postęp ma zacząć się od zera, użyj „Wyczyść postęp” w ustawieniach.
+            </p>
+          )}
+          {sync.codeChangedTs && (
+            <div className="mb-3 rounded-2xl bg-hero-gold/15 p-3 text-sm text-paper/85">
+              <p className="mb-2">
+                ⚠️ Kod rodziny Akademii zmienił się na tym urządzeniu (
+                {new Date(sync.codeChangedTs).toLocaleDateString("pl-PL")}, za Ligą Dźwięków). Urządzenia
+                podłączone wcześniej kodem z Akademii (QR albo krótki kod, np. komputer) zostały na starym kodzie
+                i trzeba je podłączyć ponownie: pokaż krótki kod i wpisz go tam w polu „Podłącz to urządzenie
+                kodem”. Każdy krótki kod działa raz — dla kolejnego urządzenia pokaż nowy.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                {shownShort ? (
+                  <>
+                    <span className="rounded-xl bg-white/10 px-4 py-2 font-mono text-2xl font-black tracking-[0.35em] text-hero-gold">
+                      {shownShort}
+                    </span>
+                    <BigButton tone="quiet" onClick={() => void makeShortCode()}>
+                      {making ? "Przygotowuję…" : "Nowy kod"}
+                    </BigButton>
+                  </>
+                ) : (
+                  <BigButton tone="quiet" onClick={() => void makeShortCode()}>
+                    {making ? "Przygotowuję…" : "Pokaż krótki kod"}
+                  </BigButton>
+                )}
+                <BigButton tone="quiet" onClick={() => dismissCodeChange()}>
+                  Podłączone — ukryj
+                </BigButton>
+              </div>
+            </div>
+          )}
           {mismatch && (
             <div className="mb-3 rounded-2xl bg-hero-gold/15 p-3 text-sm text-paper/85">
               <p className="mb-2">
                 ⚠️ Liga Dźwięków na tym urządzeniu używa innego kodu rodziny niż Akademia — urządzenia mogą
                 być w dwóch osobnych obiegach. Najprościej przejść na kod Ligi (postęp z tego urządzenia
-                zostaje i trafi do wspólnej skrzynki).
+                zostaje i trafi do wspólnej skrzynki). Urządzenia podłączone wcześniej kodem z Akademii (QR
+                albo krótki kod, np. komputer) trzeba potem podłączyć ponownie — krótkim kodem, który pokaże
+                się tutaj.
               </p>
               <BigButton
                 tone="quiet"
                 onClick={() => {
                   switchToLigaCode();
-                  setShortCode(null);
+                  dropShortCode();
                   requestSync();
                   setMessage("Akademia używa teraz kodu rodziny z Ligi.");
                 }}
@@ -395,23 +536,24 @@ function SyncCard() {
                 <p className="mb-2 text-xs text-paper/60">
                   Bez aparatu (np. komputer)? Pokaż krótki kod i wpisz go tam w polu niżej.
                 </p>
-                {shortCode ? (
+                {shownShort ? (
                   <p className="rounded-xl bg-white/10 px-4 py-3 text-center font-mono text-3xl font-black tracking-[0.35em] text-hero-gold">
-                    {shortCode}
+                    {shownShort}
                   </p>
                 ) : (
-                  <BigButton
-                    tone="quiet"
-                    onClick={async () => {
-                      setMaking(true);
-                      const code = await createShortCode();
-                      setMaking(false);
-                      setShortCode(code);
-                      if (!code) setMessage("Nie udało się przygotować kodu — sprawdź połączenie i spróbuj ponownie.");
-                    }}
-                  >
+                  <BigButton tone="quiet" onClick={() => void makeShortCode()}>
                     {making ? "Przygotowuję…" : "Pokaż krótki kod"}
                   </BigButton>
+                )}
+                {shownShort && (
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <p className="text-xs text-paper/50">
+                      Kod działa przez godzinę i tylko raz — dla kolejnego urządzenia weź nowy.
+                    </p>
+                    <BigButton tone="quiet" onClick={() => void makeShortCode()}>
+                      {making ? "Przygotowuję…" : "Nowy kod"}
+                    </BigButton>
+                  </div>
                 )}
               </div>
             </div>
@@ -420,13 +562,18 @@ function SyncCard() {
             tone="quiet"
             onClick={() => {
               disableSync();
-              setShortCode(null);
+              dropShortCode();
               setMessage("Synchronizacja wyłączona na tym urządzeniu. Postęp lokalny zostaje.");
             }}
           >
             Wyłącz
           </BigButton>
         </>
+      ) : sync?.optedOut ? (
+        <p className="mb-3 text-sm text-paper/80">
+          Wyłączona ręcznie na tym urządzeniu — Akademia nie włączy się sama, także gdy Liga jest sparowana.
+          Włącz przyciskiem niżej albo wpisz kod.
+        </p>
       ) : (
         <p className="mb-3 text-sm text-paper/80">
           Włącz na jednym urządzeniu, podłącz pozostałe kodem — postęp sam pojawi się wszędzie. Jeśli Liga
@@ -451,15 +598,19 @@ function SyncCard() {
           <BigButton
             onClick={async () => {
               setJoining(true);
-              const ok = await adoptShortCode(typed);
+              const result = await adoptShortCode(typed);
               setJoining(false);
-              if (ok) {
+              if (result === "ok") {
                 setTyped("");
-                setShortCode(null);
+                dropShortCode();
                 requestSync();
                 setMessage("Podłączone. Za chwilę pojawi się tu postęp z pozostałych urządzeń.");
+              } else if (result === "expired") {
+                setMessage("Ten kod wygasł (działa przez godzinę). Pokaż nowy krótki kod na drugim urządzeniu.");
               } else {
-                setMessage("Ten kod nie zadziałał. Sprawdź, czy jest przepisany dokładnie.");
+                setMessage(
+                  "Ten kod nie zadziałał. Sprawdź, czy jest przepisany dokładnie. Każdy krótki kod działa tylko raz — jeśli był już użyty, pokaż nowy na drugim urządzeniu.",
+                );
               }
             }}
           >
@@ -518,7 +669,7 @@ function allClipPaths(): string[] {
 }
 
 function AudioCard() {
-  const [result, setResult] = useState<{ ok: number; missing: string[] } | null>(null);
+  const [result, setResult] = useState<ClipAudit | null>(null);
   const [running, setRunning] = useState(false);
   const [voice, setVoice] = useState<VoiceStatus | null>(null);
 
@@ -529,10 +680,7 @@ function AudioCard() {
 
   const run = useCallback(async () => {
     setRunning(true);
-    const paths = allClipPaths();
-    const found = await auditClips(paths);
-    const missing = paths.filter((path) => !found[path]);
-    setResult({ ok: paths.length - missing.length, missing });
+    setResult(await auditClips(allClipPaths()));
     setRunning(false);
   }, []);
 
@@ -549,9 +697,15 @@ function AudioCard() {
       </BigButton>
       {result && (
         <p className="mt-3 text-sm">
-          Na miejscu: <strong>{result.ok}</strong>. Brakuje: <strong>{result.missing.length}</strong>
+          Na miejscu: <strong>{result.found.length}</strong>. Brakuje: <strong>{result.missing.length}</strong>
           {result.missing.length > 0 && (
             <span className="mt-1 block max-h-32 overflow-auto text-xs text-paper/55">{result.missing.slice(0, 40).join(", ")}</span>
+          )}
+          {result.unknown.length > 0 && (
+            <span className="mt-1 block text-paper/70">
+              Nie da się sprawdzić: <strong>{result.unknown.length}</strong> — brak połączenia z serwerem. To nie znaczy,
+              że ich brakuje; sprawdź ponownie z internetem.
+            </span>
           )}
         </p>
       )}
@@ -561,6 +715,8 @@ function AudioCard() {
 
 function SettingsCard() {
   const { state, setChildName, resetAll } = useProgress();
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  useEffect(() => subscribeSync(setSync), []);
   return (
     <Card>
       <h2 className="mb-3 text-lg font-bold">Ustawienia</h2>
@@ -577,11 +733,19 @@ function SettingsCard() {
         <BigButton
           tone="no"
           onClick={() => {
-            if (!window.confirm("Skasować cały postęp Akademii? Tego nie da się cofnąć.")) return;
+            if (
+              !window.confirm(
+                "Skasować cały postęp Akademii? Tego nie da się cofnąć — chyba że masz kopię zapasową w pliku („Zapisz kopię” wyżej).",
+              )
+            )
+              return;
             const fluent = tablesSummary(state.facts).fluent;
+            const everywhere = sync?.enabled
+              ? " Synchronizacja jest włączona, więc postęp zniknie też na pozostałych urządzeniach podłączonych kodem rodziny."
+              : "";
             if (
               window.confirm(
-                `Na pewno? Znikną wszystkie ${state.sessions.length} sesje, ${state.mocks.length} próbnych testów i stan ${fluent} płynnych faktów. Postęp Ligi Dźwięków zostaje nietknięty.`,
+                `Na pewno? Znikną: ${pl(state.sessions.length, "sesja", "sesje", "sesji")}, ${pl(state.mocks.length, "próbny test", "próbne testy", "próbnych testów")} i stan ${pl(fluent, "płynnego faktu", "płynnych faktów", "płynnych faktów")}.${everywhere} Postęp Ligi Dźwięków zostaje nietknięty.`,
               )
             ) {
               resetAll();
